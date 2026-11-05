@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+out/
+
+# Local test server (see CONTRIBUTING.md)
+run/
+
+# Jars don't go into the repo (the Gradle wrapper is the exception)
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local Claude Code settings
+.claude/settings.local.json

@@ -1,0 +1,55 @@
+# Every day at 00:00 UTC: gathers the PRs merged the previous day and publishes a
+# "recap-YYYY-MM-DD" Release with the changelog. If the DISCORD_WEBHOOK secret exists,
+# it posts the recap to Discord too.
+name: Daily recap
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  recap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build and publish recap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          set -eu
+          DAY=$(date -u -d 'yesterday' +%F)
+          gh pr list --repo "$REPO" --state merged --base main --limit 200 \
+            --search "merged:${DAY}T00:00:00Z..${DAY}T23:59:59Z" \
+            --json number,title,author,url > prs.json
+          COUNT=$(jq length prs.json)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No PRs merged on $DAY."
+            exit 0
+          fi
+
+          {
+            echo "## Recap for $DAY — $COUNT PR(s)"
+            echo
+            jq -r 'sort_by(.number)[] | "- \(.title) ([#\(.number)](\(.url))) — @\(.author.login)"' prs.json
+            echo
+            echo "**Contributors:** $(jq -r '[.[].author.login] | unique | map("@" + .) | join(", ")' prs.json)"
+          } > recap.md
+          cat recap.md
+
+          if gh release view "recap-$DAY" --repo "$REPO" > /dev/null 2>&1; then
+            gh release edit "recap-$DAY" --repo "$REPO" --notes-file recap.md
+          else
+            gh release create "recap-$DAY" --repo "$REPO" --target main \
+              --title "Recap $DAY" --notes-file recap.md --latest=false
+          fi
+
+          if [ -n "$DISCORD_WEBHOOK" ]; then
+            jq -n --rawfile c recap.md '{content: ($c | .[0:1900])}' \
+              | curl -fsS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
+          fi

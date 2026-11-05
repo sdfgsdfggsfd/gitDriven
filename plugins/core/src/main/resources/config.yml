@@ -1,0 +1,38 @@
+# Core — git-driven updater. Details in docs/ARCHITECTURE.md.
+
+repository:
+  # The server's public repository. Running a fork? Point this at your fork.
+  url: "https://github.com/sdfgsdfggsfd/gitDriven.git"
+  branch: "main"
+  # Interval between checks. `git fetch` is cheap, 60s is fine.
+  poll-interval-seconds: 60
+
+build:
+  # Gradle Wrapper arguments (gradlew / gradlew.bat), run inside the clone.
+  args: ["build", "collectServerPlugins", "--no-daemon", "--console=plain"]
+  timeout-minutes: 15
+  # Where the build leaves the finished jars (relative to the repo root).
+  artifacts-dir: "build/server-plugins"
+  # Repo folder copied over the server root (versioned configs).
+  server-files-dir: "server"
+  # Commits that only touch these paths trigger no build and no restart.
+  # Syntax: * = anything without "/", ** = anything.
+  ignore-paths:
+    - "**.md"
+    - "docs/**"
+    - ".github/**"
+    - "site/**"
+    - "LICENSE"
+
+restart:
+  # When to apply an update that has already been built:
+  #   immediate — right after the build (with a countdown)
+  #   debounce  — wait X minutes with no new merges (batches merges that land close together)
+  #   daily     — only at the daily time (UTC)
+  mode: debounce
+  debounce-minutes: 10
+  daily-time-utc: "00:00"
+  # Warning to players before the restart.
+  countdown-seconds: 60
+  # If nobody is online, apply right away, in any mode.
+  apply-when-empty: true

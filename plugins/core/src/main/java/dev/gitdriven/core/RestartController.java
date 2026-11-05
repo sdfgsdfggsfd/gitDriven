@@ -1,0 +1,229 @@
+package dev.gitdriven.core;
+
+import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
+
+/**
+ * Decides WHEN to restart to apply an update that has already been built (staging/READY).
+ * An async tick every second evaluates the configured mode and drives the countdown.
+ * The restart itself is just a {@code Bukkit.shutdown()}: applying the files and starting
+ * the server again is the start script's job (scripts/start.sh or start.ps1).
+ */
+final class RestartController {
+    private static final int[] ANNOUNCE_AT = {600, 300, 120, 60, 30, 15, 10, 5, 4, 3, 2, 1};
+
+    private final Plugin plugin;
+    private final CoreConfig config;
+    private final Messages messages;
+    private final AtomicBoolean shuttingDown = new AtomicBoolean();
+
+    private volatile String pendingCommit;
+    private volatile List<String> pendingChanges = List.of();
+    private volatile Instant debounceDeadline = Instant.MAX;
+    private volatile Instant nextDaily;
+    private volatile Instant restartAt;   // != null => countdown in progress
+    private volatile boolean held;        // /core cancel: hold until the next update or /core restart
+    private int lastAnnounced = Integer.MAX_VALUE;
+    private ScheduledTask task;
+
+    RestartController(Plugin plugin, CoreConfig config, Messages messages) {
+        this.plugin = plugin;
+        this.config = config;
+        this.messages = messages;
+    }
+
+    void start() {
+        nextDaily = nextDaily(Instant.now(), config.dailyTimeUtc());
+        task = Bukkit.getAsyncScheduler().runAtFixedRate(plugin, t -> tick(), 1, 1, TimeUnit.SECONDS);
+    }
+
+    void stop() {
+        if (task != null) {
+            task.cancel();
+        }
+    }
+
+    /** A new update was built and is in staging/. */
+    synchronized void onStaged(String commit, List<String> changes) {
+        pendingCommit = commit;
+        pendingChanges = changes;
+        held = false;
+        debounceDeadline = Instant.now().plus(config.debounce());
+
+        String when = switch (config.restartMode()) {
+            case IMMEDIATE -> "in " + config.countdownSeconds() + "s";
+            case DEBOUNCE -> "in ~" + config.debounce().toMinutes() + " min (unless another merge lands)";
+            case DAILY -> "at " + config.dailyTimeUtc() + " UTC";
+        };
+        if (restartAt == null) {
+            messages.broadcast("<green>Update <white><sha></white> ready</green> <gray>(<n> change(s)). "
+                            + "Restart <when>. See <white>/changelog</white>.</gray>",
+                    "sha", Messages.shortSha(commit), "n", String.valueOf(changes.size()), "when", when);
+        }
+    }
+
+    /** The staging was discarded (e.g. a revert left the remote equal to what's already running). */
+    synchronized void clearPending() {
+        pendingCommit = null;
+        pendingChanges = List.of();
+        if (restartAt != null) {
+            restartAt = null;
+            messages.broadcast("<yellow>Restart cancelled: there's nothing left to apply.</yellow>");
+        }
+    }
+
+    /** /core restart [seconds] — works even without a pending update. */
+    synchronized void restartIn(int seconds) {
+        held = false;
+        beginCountdown(Instant.now().plusSeconds(Math.max(0, seconds)));
+    }
+
+    /** /core cancel */
+    synchronized boolean cancel() {
+        if (restartAt == null || shuttingDown.get()) {
+            return false;
+        }
+        restartAt = null;
+        held = true;
+        messages.broadcast("<yellow>Restart postponed by an admin.</yellow>");
+        return true;
+    }
+
+    String pendingCommit() {
+        return pendingCommit;
+    }
+
+    List<String> pendingChanges() {
+        return pendingChanges;
+    }
+
+    Instant restartAt() {
+        return restartAt;
+    }
+
+    boolean held() {
+        return held;
+    }
+
+    String describeSchedule() {
+        if (restartAt != null) {
+            return "restarting in " + Duration.between(Instant.now(), restartAt).toSeconds() + "s";
+        }
+        if (pendingCommit == null) {
+            return "nothing pending";
+        }
+        if (held) {
+            return "pending, postponed by an admin";
+        }
+        return switch (config.restartMode()) {
+            case IMMEDIATE -> "pending (immediate)";
+            case DEBOUNCE -> "pending, restart at " + debounceDeadline.atZone(ZoneOffset.UTC).toLocalTime().withNano(0) + " UTC";
+            case DAILY -> "pending, restart at " + nextDaily.atZone(ZoneOffset.UTC).toLocalTime() + " UTC";
+        };
+    }
+
+    private synchronized void tick() {
+        Instant now = Instant.now();
+        if (restartAt != null) {
+            countdown(now);
+            return;
+        }
+        if (!now.isBefore(nextDaily)) {
+            nextDaily = nextDaily(now, config.dailyTimeUtc());
+        }
+        if (pendingCommit == null || held) {
+            return;
+        }
+        if (config.applyWhenEmpty() && Bukkit.getOnlinePlayers().isEmpty()) {
+            beginCountdown(now);
+            return;
+        }
+        switch (config.restartMode()) {
+            case IMMEDIATE -> beginCountdown(now.plusSeconds(config.countdownSeconds()));
+            case DEBOUNCE -> {
+                if (!now.isBefore(debounceDeadline)) {
+                    beginCountdown(now.plusSeconds(config.countdownSeconds()));
+                }
+            }
+            case DAILY -> {
+                // Start the countdown early so the restart lands exactly on the scheduled time.
+                if (!now.isBefore(nextDaily.minusSeconds(config.countdownSeconds()))) {
+                    beginCountdown(nextDaily);
+                }
+            }
+        }
+    }
+
+    private void beginCountdown(Instant at) {
+        restartAt = at;
+        long secs = Math.max(0, Duration.between(Instant.now(), at).toSeconds());
+        lastAnnounced = bucket(secs);
+        if (secs > 0) {
+            String what = pendingCommit != null
+                    ? " to apply <white>" + Messages.shortSha(pendingCommit) + "</white>"
+                    : "";
+            messages.broadcast("<gold>Server restarts in <white><s>s</white>" + what + ".</gold>",
+                    "s", String.valueOf(secs));
+        }
+    }
+
+    private void countdown(Instant now) {
+        long remaining = Duration.between(now, restartAt).toSeconds();
+        if (remaining <= 0) {
+            shutdown();
+            return;
+        }
+        int b = bucket(remaining);
+        if (b < lastAnnounced) {
+            lastAnnounced = b;
+            messages.broadcast("<gold>Restarting in <white><s>s</white>…</gold>", "s", String.valueOf(remaining));
+        }
+    }
+
+    /** Smallest announcement mark >= remaining (marks in ANNOUNCE_AT, descending). */
+    private static int bucket(long remaining) {
+        int b = Integer.MAX_VALUE;
+        for (int t : ANNOUNCE_AT) {
+            if (remaining <= t) {
+                b = t;
+            }
+        }
+        return b;
+    }
+
+    private void shutdown() {
+        if (!shuttingDown.compareAndSet(false, true)) {
+            return;
+        }
+        restartAt = null;
+        plugin.getLogger().info("Restarting to apply " + Messages.shortSha(pendingCommit));
+        Component kick = Messages.fmt("<green>Updating the server!</green> <gray>Back in a moment.</gray>");
+        Bukkit.getGlobalRegionScheduler().execute(plugin, () -> {
+            // On Folia each player belongs to a region: kick through the entity's scheduler.
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                p.getScheduler().run(plugin, t -> p.kick(kick), null);
+            }
+            Bukkit.getGlobalRegionScheduler().runDelayed(plugin, t -> Bukkit.shutdown(), 20L);
+        });
+    }
+
+    static Instant nextDaily(Instant now, LocalTime time) {
+        ZonedDateTime z = now.atZone(ZoneOffset.UTC);
+        ZonedDateTime candidate = z.toLocalDate().atTime(time).atZone(ZoneOffset.UTC);
+        if (!candidate.isAfter(z)) {
+            candidate = candidate.plusDays(1);
+        }
+        return candidate.toInstant();
+    }
+}

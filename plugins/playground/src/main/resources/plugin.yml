@@ -1,0 +1,15 @@
+name: Playground
+version: "${version}"
+main: dev.gitdriven.playground.PlaygroundPlugin
+api-version: "${apiVersion}"
+folia-supported: true
+description: Features built by the community.
+
+commands:
+  hello:
+    description: Says hello in style.
+    permission: playground.hello
+
+permissions:
+  playground.hello:
+    default: true

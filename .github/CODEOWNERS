@@ -1,0 +1,15 @@
+# Who can approve PRs. With "Require review from Code Owners" enabled in the branch
+# ruleset, no PR gets in without an OK from someone listed here.
+# To add approvers, put their usernames next to the owner (e.g. @sdfgsdfggsfd @alice).
+
+*                     @sdfgsdfggsfd
+
+# Sensitive areas: the updater, the build and the automation run on the server machine.
+/plugins/core/        @sdfgsdfggsfd
+/build.gradle.kts     @sdfgsdfggsfd
+/settings.gradle.kts  @sdfgsdfggsfd
+/gradle/              @sdfgsdfggsfd
+/gradlew              @sdfgsdfggsfd
+/gradlew.bat          @sdfgsdfggsfd
+/scripts/             @sdfgsdfggsfd
+/.github/             @sdfgsdfggsfd

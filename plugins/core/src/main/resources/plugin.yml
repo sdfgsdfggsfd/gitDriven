@@ -1,0 +1,24 @@
+name: Core
+version: "${version}"
+main: dev.gitdriven.core.CorePlugin
+api-version: "${apiVersion}"
+folia-supported: true
+description: Pulls the server repository, builds the plugins and applies the updates.
+
+commands:
+  core:
+    description: Manage the git-driven updater.
+    usage: /core <status|check|restart [seconds]|cancel>
+    permission: core.admin
+  changelog:
+    description: Shows what changed in the last update (and what's coming next).
+    aliases: [whatsnew]
+    permission: core.changelog
+
+permissions:
+  core.admin:
+    description: Use /core and receive build notifications.
+    default: op
+  core.changelog:
+    description: Use /changelog.
+    default: true

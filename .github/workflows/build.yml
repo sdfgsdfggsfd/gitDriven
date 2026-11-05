@@ -1,0 +1,36 @@
+# Required check for every PR: if it doesn't build here, it doesn't reach the server.
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Folia rules
+        run: sh scripts/check-folia.sh
+
+      - name: Build + tests
+        run: |
+          chmod +x gradlew
+          ./gradlew build collectServerPlugins --console=plain
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-plugins
+          path: build/server-plugins/*.jar
