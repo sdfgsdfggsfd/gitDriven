@@ -2,12 +2,21 @@
 # branch ruleset allows it: approval from a CODEOWNER + a green "build" check.
 # Result: approved PR = merged PR = Core updates the server.
 #
+# Token: GitHub doesn't start workflows from events caused by the default GITHUB_TOKEN,
+# so a merge done by auto-merge enabled with it would not run "Website" or "Build" on
+# main (website changes from PRs would never get published). With the AUTOMERGE_TOKEN
+# secret (a fine-grained token, see docs/MAINTAINERS.md) the merge is a normal push and
+# they run. Without the secret it falls back to GITHUB_TOKEN.
+#
+# Also runs on every new push to the PR ("synchronize"): GitHub turns auto-merge off when
+# someone without write access pushes new commits, so it gets turned back on.
+#
 # Safe with pull_request_target because it does NOT check out or run any code from the PR.
 name: Auto-merge
 
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
 
 permissions:
   contents: write
@@ -20,7 +29,14 @@ jobs:
     steps:
       - name: Enable auto-merge
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: gh pr merge "$PR" --repo "$REPO" --auto --squash
+        run: |
+          set -eu
+          enabled=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$enabled" = "true" ]; then
+            echo "Auto-merge is already on for #$PR."
+          else
+            gh pr merge "$PR" --repo "$REPO" --auto --squash
+          fi

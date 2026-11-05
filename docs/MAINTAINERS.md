@@ -37,6 +37,17 @@ PRs), or add a second approver to `CODEOWNERS`.
       <https://sdfgsdfggsfd.github.io/gitDriven/> on every merge that touches it.
       Edit `site/config.js` to set the server address once there is one.
 
+**Auto-merge token** — without it, merges done by auto-merge don't run the `Website` and
+`Build` workflows on `main` (GitHub doesn't start workflows from events caused by the
+default `GITHUB_TOKEN`), so website changes from PRs would never get published.
+- [ ] Create a **fine-grained** token (your account → Settings → Developer settings →
+      Personal access tokens → Fine-grained tokens). Repository access: **Only select
+      repositories → gitDriven**. Permissions: **Contents** and **Pull requests**, both
+      **Read and write**.
+- [ ] Save it as the `AUTOMERGE_TOKEN` secret (Settings → Secrets → Actions).
+- When it expires, auto-merge keeps working with the default token, but `Website` stops
+  running after merges again: create a new one and update the secret.
+
 **CODEOWNERS** — `.github/CODEOWNERS` currently lists only `@sdfgsdfggsfd`. To add
 approvers, add their usernames next to it (e.g. `@alice @bob`). Teams
 (`@org/team`) require a GitHub organization.
