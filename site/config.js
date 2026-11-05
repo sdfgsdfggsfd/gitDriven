@@ -7,5 +7,5 @@ window.GITDRIVEN = {
   // Minecraft: Java Edition version players need to join.
   version: "26.3",
   // Discord invite link. Empty hides the Discord links.
-  discord: "",
+  discord: "https://discord.gg/TaWZaVSdhr",
 };

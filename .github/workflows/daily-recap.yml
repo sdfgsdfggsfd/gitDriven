@@ -50,6 +50,6 @@ jobs:
           fi
 
           if [ -n "$DISCORD_WEBHOOK" ]; then
-            jq -n --rawfile c recap.md '{content: ($c | .[0:1900])}' \
+            jq -n --rawfile c recap.md '{content: ($c | .[0:1900]), allowed_mentions: {parse: []}}' \
               | curl -fsS -H "Content-Type: application/json" -d @- "$DISCORD_WEBHOOK"
           fi

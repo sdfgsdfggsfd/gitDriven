@@ -4,7 +4,7 @@ A Minecraft server **built by the people who play on it**. Everything that runs 
 (plugins, mechanics, configs) lives in this public repository. Open a PR, get it
 approved: a few minutes later it's on the server. No manual deploys, no admin in between.
 
-> **Website:** [sdfgsdfggsfd.github.io/gitDriven](https://sdfgsdfggsfd.github.io/gitDriven/) · **IP:** coming soon · **Version:** Folia 26.3 · **Changelog:** [`recap-*` releases](https://github.com/sdfgsdfggsfd/gitDriven/releases) and `/changelog` in-game
+> **Website:** [sdfgsdfggsfd.github.io/gitDriven](https://sdfgsdfggsfd.github.io/gitDriven/) · **Discord:** [discord.gg/TaWZaVSdhr](https://discord.gg/TaWZaVSdhr) · **IP:** coming soon · **Version:** Folia 26.3 · **Changelog:** [`recap-*` releases](https://github.com/sdfgsdfggsfd/gitDriven/releases) and `/changelog` in-game
 
 ## How it works
 

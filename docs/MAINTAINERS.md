@@ -41,8 +41,14 @@ PRs), or add a second approver to `CODEOWNERS`.
 approvers, add their usernames next to it (e.g. `@alice @bob`). Teams
 (`@org/team`) require a GitHub organization.
 
-**Optional secret** — `DISCORD_WEBHOOK` (Settings → Secrets → Actions) makes the daily
-recap get posted to a Discord channel too.
+**Discord** — the channel's webhook URL never goes in the repo: it's public, and anyone
+with the URL can post to the channel.
+- [ ] **Settings → Webhooks → Add webhook**: an alert for every code change (pushes to
+      any branch, merges included, and pull requests). Payload URL: the Discord webhook
+      URL **with `/github` at the end**; content type `application/json`; events:
+      **Pushes** and **Pull requests**.
+- [ ] Optional secret `DISCORD_WEBHOOK` (Settings → Secrets → Actions): the daily recap
+      gets posted to Discord too. Same URL, without `/github`.
 
 ## Review checklist
 
