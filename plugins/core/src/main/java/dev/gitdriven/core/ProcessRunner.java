@@ -67,14 +67,25 @@ final class ProcessRunner {
         p.destroyForcibly();
     }
 
+    /**
+     * Reads the output until the process closes it. Keeps reading even if the log file can't
+     * be written: a process whose output nobody reads blocks once the pipe buffer is full.
+     */
     private static void pump(Process process, Deque<String> tail, int keepLines, Path logFile) {
+        Writer log = openLog(logFile);
         try (BufferedReader in = new BufferedReader(
-                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-                Writer log = logFile == null ? Writer.nullWriter() : Files.newBufferedWriter(logFile)) {
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = in.readLine()) != null) {
-                log.write(line);
-                log.write(System.lineSeparator());
+                if (log != null) {
+                    try {
+                        log.write(line);
+                        log.write(System.lineSeparator());
+                    } catch (IOException e) {
+                        closeQuietly(log); // disk full or similar: stop logging, keep reading
+                        log = null;
+                    }
+                }
                 synchronized (tail) {
                     tail.addLast(line);
                     if (tail.size() > keepLines) {
@@ -84,6 +95,30 @@ final class ProcessRunner {
             }
         } catch (IOException ignored) {
             // process killed mid-read
+        } finally {
+            closeQuietly(log);
+        }
+    }
+
+    private static Writer openLog(Path logFile) {
+        if (logFile == null) {
+            return null;
+        }
+        try {
+            return Files.newBufferedWriter(logFile, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static void closeQuietly(Writer w) {
+        if (w == null) {
+            return;
+        }
+        try {
+            w.close();
+        } catch (IOException ignored) {
+            // nothing useful to do
         }
     }
 

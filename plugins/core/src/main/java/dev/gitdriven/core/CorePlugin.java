@@ -30,7 +30,7 @@ public final class CorePlugin extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        config = CoreConfig.load(getConfig());
+        config = CoreConfig.load(getConfig(), getLogger());
         // The working directory is the server root (the start scripts guarantee that).
         state = new DeployState(Path.of("").toAbsolutePath().resolve(".git-driven"));
         seenKey = new NamespacedKey(this, "seen-commit");

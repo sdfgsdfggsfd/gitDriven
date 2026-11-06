@@ -33,6 +33,7 @@ final class RestartController {
     private volatile Instant debounceDeadline = Instant.MAX;
     private volatile Instant nextDaily;
     private volatile Instant restartAt;   // != null => countdown in progress
+    private volatile boolean manual;      // the countdown came from /core restart
     private volatile boolean held;        // /core cancel: hold until the next update or /core restart
     private int lastAnnounced = Integer.MAX_VALUE;
     private ScheduledTask task;
@@ -63,7 +64,9 @@ final class RestartController {
 
         String when = switch (config.restartMode()) {
             case IMMEDIATE -> "in " + config.countdownSeconds() + "s";
-            case DEBOUNCE -> "in ~" + config.debounce().toMinutes() + " min (unless another merge lands)";
+            case DEBOUNCE -> config.debounce().isZero()
+                    ? "in " + config.countdownSeconds() + "s"
+                    : "in ~" + config.debounce().toMinutes() + " min (unless another merge lands)";
             case DAILY -> "at " + config.dailyTimeUtc() + " UTC";
         };
         if (restartAt == null) {
@@ -77,7 +80,8 @@ final class RestartController {
     synchronized void clearPending() {
         pendingCommit = null;
         pendingChanges = List.of();
-        if (restartAt != null) {
+        // An admin's /core restart stays: they asked for a restart, not for an update.
+        if (restartAt != null && !manual && !shuttingDown.get()) {
             restartAt = null;
             messages.broadcast("<yellow>Restart cancelled: there's nothing left to apply.</yellow>");
         }
@@ -87,6 +91,7 @@ final class RestartController {
     synchronized void restartIn(int seconds) {
         held = false;
         beginCountdown(Instant.now().plusSeconds(Math.max(0, seconds)));
+        manual = true;
     }
 
     /** /core cancel */
@@ -167,6 +172,7 @@ final class RestartController {
 
     private void beginCountdown(Instant at) {
         restartAt = at;
+        manual = false;
         long secs = Math.max(0, Duration.between(Instant.now(), at).toSeconds());
         lastAnnounced = bucket(secs);
         if (secs > 0) {

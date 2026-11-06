@@ -1,0 +1,101 @@
+package dev.gitdriven.core;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.junit.jupiter.api.Test;
+
+/** A bad value in config.yml must fall back to the default, never stop Core from enabling. */
+class CoreConfigTest {
+    private final List<String> warnings = new ArrayList<>();
+    private final Logger log = Logger.getAnonymousLogger();
+
+    CoreConfigTest() {
+        log.setUseParentHandlers(false);
+        log.addHandler(new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                warnings.add(record.getMessage());
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        });
+    }
+
+    /** The server's config.yml on top of the defaults bundled in the jar, like getConfig(). */
+    private CoreConfig load(String yaml) throws InvalidConfigurationException {
+        YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(
+                Objects.requireNonNull(getClass().getResourceAsStream("/config.yml")), StandardCharsets.UTF_8));
+        YamlConfiguration c = new YamlConfiguration();
+        c.loadFromString(yaml);
+        c.setDefaults(defaults);
+        return CoreConfig.load(c, log);
+    }
+
+    @Test
+    void bundledDefaults() throws Exception {
+        CoreConfig c = load("");
+        assertEquals("https://github.com/sdfgsdfggsfd/gitDriven.git", c.repoUrl());
+        assertEquals("main", c.branch());
+        assertEquals(Duration.ofSeconds(60), c.pollInterval());
+        assertEquals(CoreConfig.DEFAULT_BUILD_ARGS, c.buildArgs());
+        assertEquals(CoreConfig.RestartMode.DEBOUNCE, c.restartMode());
+        assertEquals(LocalTime.MIDNIGHT, c.dailyTimeUtc());
+        assertTrue(c.ignorePaths().matches("site/index.html"));
+        assertTrue(warnings.isEmpty(), warnings.toString());
+    }
+
+    @Test
+    void invalidValuesFallBack() throws Exception {
+        CoreConfig c = load("""
+                repository:
+                  branch: "  "
+                  poll-interval-seconds: 1
+                build:
+                  args: []
+                restart:
+                  mode: hourly
+                  daily-time-utc: "25:99"
+                  countdown-seconds: -5
+                """);
+        assertEquals("main", c.branch());
+        assertEquals(Duration.ofSeconds(15), c.pollInterval());
+        assertEquals(CoreConfig.DEFAULT_BUILD_ARGS, c.buildArgs());
+        assertEquals(CoreConfig.RestartMode.DEBOUNCE, c.restartMode());
+        assertEquals(LocalTime.MIDNIGHT, c.dailyTimeUtc());
+        assertEquals(0, c.countdownSeconds());
+        assertEquals(3, warnings.size(), warnings.toString());
+    }
+
+    @Test
+    void modeIsCaseInsensitive() throws Exception {
+        assertEquals(CoreConfig.RestartMode.DAILY, load("restart: {mode: \" Daily \"}").restartMode());
+    }
+
+    @Test
+    void timesWrittenWithoutQuotes() throws Exception {
+        // YAML 1.1 turns these into base-60 integers (750 and 4980).
+        assertEquals(LocalTime.of(12, 30), load("restart:\n  daily-time-utc: 12:30\n").dailyTimeUtc());
+        assertEquals(LocalTime.of(1, 23), load("restart:\n  daily-time-utc: 1:23:00\n").dailyTimeUtc());
+        assertEquals(LocalTime.of(4, 0), load("restart:\n  daily-time-utc: \"4:00\"\n").dailyTimeUtc());
+        assertTrue(warnings.isEmpty(), warnings.toString());
+    }
+}
