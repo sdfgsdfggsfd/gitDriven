@@ -40,6 +40,7 @@ final class UpdateService {
     private volatile String failedMessage;
     private volatile String lastError;
     private String lastLoggedError; // only touched by the worker thread
+    private String docsOnTopOfStaged; // same: logged once, not every minute
 
     UpdateService(CoreConfig config, DeployState state, ProcessRunner runner, RestartController restart,
             Messages messages, Logger log) {
@@ -130,8 +131,7 @@ final class UpdateService {
         }
         if (remote.equals(deployed)) {
             if (staged != null) { // e.g. a revert/force-push back to what's already running
-                state.clearStaging();
-                restart.clearPending();
+                restart.clearPending(state::clearStaging);
             }
             return;
         }
@@ -140,18 +140,25 @@ final class UpdateService {
         }
 
         boolean deployedKnown = deployed != null && git.hasCommit(deployed);
-        if (deployedKnown) {
-            List<String> files = git.changedFiles(deployed, remote);
-            if (files.stream().allMatch(config.ignorePaths()::matches)) {
-                log.info("Commit " + Messages.shortSha(remote) + " only touches docs/CI; no build and no restart.");
-                git.checkout(remote);
-                state.writeDeployedCommit(remote);
-                if (staged != null) {
-                    state.clearStaging();
-                    restart.clearPending();
-                }
-                return;
+        if (deployedKnown && config.onlyIgnored(git.changedFiles(deployed, remote))) {
+            log.info("Commit " + Messages.shortSha(remote) + " only touches docs/CI; no build and no restart.");
+            git.checkout(remote);
+            state.writeDeployedCommit(remote);
+            if (staged != null) {
+                restart.clearPending(state::clearStaging);
             }
+            return;
+        }
+        // An update is built and waiting for the restart, and everything after it only touches
+        // docs/CI: the staged build is still current. Rebuilding would only push the restart back
+        // (debounce). After the restart the commit is marked as applied by the check above.
+        if (staged != null && git.hasCommit(staged) && config.onlyIgnored(git.changedFiles(staged, remote))) {
+            if (!remote.equals(docsOnTopOfStaged)) {
+                docsOnTopOfStaged = remote;
+                log.info("Commit " + Messages.shortSha(remote) + " only touches docs/CI on top of the update "
+                        + "waiting for the restart (" + Messages.shortSha(staged) + "); no new build.");
+            }
+            return;
         }
 
         status = "building " + Messages.shortSha(remote);
@@ -187,12 +194,16 @@ final class UpdateService {
         }
 
         status = "staging " + Messages.shortSha(remote);
-        builder.stage(git.dir(), remote, changes);
+        builder.prepare(git.dir(), remote, changes);
         failedCommit = null;
         failedMessage = null;
         lastError = null;
+        if (!restart.onStaged(remote, changes, builder::publish)) {
+            log.info("Update " + Messages.shortSha(remote) + " was built while the server was already restarting; "
+                    + "it will be built again after the restart.");
+            return;
+        }
         log.info("Update " + Messages.shortSha(remote) + " ready in " + state.stagingDir());
-        restart.onStaged(remote, changes);
     }
 
     String status() {

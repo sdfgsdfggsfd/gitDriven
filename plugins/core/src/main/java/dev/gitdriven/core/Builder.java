@@ -37,10 +37,14 @@ final class Builder {
         return runner.run(repoDir, cmd, config.buildTimeout(), env, 30, state.buildLog());
     }
 
-    /** Copies jars + server files into staging/ and only creates READY at the very end. */
-    void stage(Path repoDir, String commit, List<String> changes) throws IOException {
+    /**
+     * Copies jars + server files into staging.tmp/, READY included. Nothing the start script
+     * reads changes until {@link #publish()}.
+     */
+    void prepare(Path repoDir, String commit, List<String> changes) throws IOException {
         Path tmp = state.stagingTmpDir();
         DeployState.deleteRecursively(tmp);
+        DeployState.deleteRecursively(state.stagingOldDir());
         Path pluginsOut = Files.createDirectories(tmp.resolve("plugins"));
 
         Path artifacts = repoDir.resolve(config.artifactsDir());
@@ -73,9 +77,24 @@ final class Builder {
 
         Files.writeString(tmp.resolve("COMMIT"), commit + "\n");
         Files.write(tmp.resolve("CHANGES.txt"), changes, StandardCharsets.UTF_8);
+        Files.writeString(tmp.resolve("READY"), commit + "\n");
+    }
 
-        state.clearStaging();
-        Files.move(tmp, state.stagingDir());
-        Files.writeString(state.stagingDir().resolve("READY"), commit + "\n");
+    /**
+     * Swaps the prepared staging.tmp/ in as staging/ with two renames, instead of deleting the
+     * old staging/ and copying the new one. Called under {@link RestartController}'s lock, so a
+     * restart can't happen between the renames.
+     */
+    void publish() throws IOException {
+        Path old = state.stagingOldDir();
+        if (Files.exists(state.stagingDir())) {
+            Files.move(state.stagingDir(), old);
+        }
+        Files.move(state.stagingTmpDir(), state.stagingDir());
+        try {
+            DeployState.deleteRecursively(old);
+        } catch (IOException e) {
+            // Only a leftover: prepare() removes it before the next update.
+        }
     }
 }

@@ -88,6 +88,18 @@ record CoreConfig(
         }
     }
 
+    /**
+     * True if every path only touches docs/CI: no build and no restart needed.
+     * {@code ignore-paths} decides, except under {@code plugins/} and the server-files folder.
+     * Everything there reaches the server (packed into a jar or copied over the root), so a broad
+     * pattern like {@code **.md} can't skip a file a plugin ships as a resource.
+     */
+    boolean onlyIgnored(List<String> paths) {
+        String serverPrefix = serverFilesDir.replaceAll("/+$", "") + "/";
+        return paths.stream().allMatch(p -> ignorePaths.matches(p)
+                && !p.startsWith("plugins/") && !p.startsWith(serverPrefix));
+    }
+
     boolean isPlaceholderRepo() {
         return repoUrl.isEmpty() || repoUrl.contains("OWNER/REPO");
     }

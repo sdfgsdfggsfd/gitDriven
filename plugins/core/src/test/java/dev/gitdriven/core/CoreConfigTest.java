@@ -1,6 +1,7 @@
 package dev.gitdriven.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStreamReader;
@@ -113,6 +114,18 @@ class CoreConfigTest {
         assertEquals(LocalTime.of(4, 0), c.dailyTimeUtc());
         assertEquals(30, c.countdownSeconds());
         assertEquals(2, warnings.size(), warnings.toString());
+    }
+
+    /** "**.md" also matches .md files a plugin packs into its jar: those still need a build. */
+    @Test
+    void filesThatReachTheServerAreNeverIgnored() throws Exception {
+        CoreConfig c = load("");
+        assertTrue(c.onlyIgnored(List.of("README.md", "docs/OPERATIONS.md", "site/index.html", ".github/x.yml")));
+        assertFalse(c.onlyIgnored(List.of("README.md", "plugins/guide/src/main/resources/book.md")));
+        assertFalse(c.onlyIgnored(List.of("plugins/guide/README.md")));
+        assertFalse(c.onlyIgnored(List.of("server/plugins/Guide/notes.md")));
+        assertTrue(load("build: {server-files-dir: \"server/\"}").onlyIgnored(List.of("serverless.md")));
+        assertFalse(load("build: {server-files-dir: \"server/\"}").onlyIgnored(List.of("server/a.md")));
     }
 
     @Test

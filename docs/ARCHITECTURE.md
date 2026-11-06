@@ -39,7 +39,10 @@ Every `poll-interval-seconds` (60 s), on its own thread, never on a game thread:
    try again (the next commit will). `/core check` forces it.
 4. **Docs only?** If *all* files changed since the production commit match
    `ignore-paths` (`**.md`, `docs/**`, `.github/**`, `site/**`), mark it as applied, with no build
-   and no restart.
+   and no restart. Files under `plugins/` and `server/` never count as docs: they reach the
+   server, even a `.md` a plugin packs into its jar. If an update is already staged and the
+   new commits on top of it are docs only, the staged build stays and the restart isn't pushed
+   back.
 5. **Check `server/`.** Everything in it is copied over the server root, so only config
    files may be there (rules in [server/README.md](../server/README.md)). A commit that
    breaks them is refused like a failed build, before Gradle runs.
@@ -47,11 +50,15 @@ Every `poll-interval-seconds` (60 s), on its own thread, never on a game thread:
    with the same Java as the server. Full output in `.git-driven/last-build.log`.
    Failed: notify everyone with `core.admin`; the server stays on the current version.
 7. **Staging.** Copy `build/server-plugins/*.jar` and the `server/` folder into
-   `.git-driven/staging/`, write `COMMIT`, `CHANGES.txt` and, last, `READY`.
+   `.git-driven/staging.tmp/` with `COMMIT`, `CHANGES.txt` and `READY`, then rename it to
+   `staging/`.
 8. **Restart.** Announce it in chat and hand over to the `RestartController` (next section).
 
 If another merge lands while an update is waiting for the restart, Core builds the
 new commit and replaces the staging. The tip of `main` is always what goes to the server.
+The old `staging/` stays complete until the new one is renamed into place, and the rename
+holds the same lock as the restart countdown: a restart never finds a half-replaced staging.
+If the countdown was already running, the restart applies the newer build.
 
 ## Restart policy
 
@@ -89,7 +96,8 @@ At the server root (the Java working directory):
 │   ├── files/            copy of the repo's server/ (without README.md and .gitkeep)
 │   ├── COMMIT            SHA
 │   ├── CHANGES.txt       "abc1234 PR title (#12) — author", one per line
-│   └── READY             created last; without it the script ignores the staging
+│   └── READY             without it the script ignores the staging
+├── staging.tmp/          the next staging while Core writes it (renamed to staging/)
 ├── deployed-commit       SHA in production (written by the script)
 ├── last-changes.txt      CHANGES.txt of the last update (shown on join and in /changelog)
 ├── managed-plugins.txt   jars installed by Core (removed before applying the new ones)

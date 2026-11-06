@@ -1,6 +1,7 @@
 package dev.gitdriven.core;
 
 import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
@@ -63,8 +64,26 @@ final class RestartController {
         }
     }
 
-    /** A new update was built and is in staging/. */
-    synchronized void onStaged(String commit, List<String> changes) {
+    /** A change to staging/ that must not overlap with a restart. */
+    @FunctionalInterface
+    interface StagingChange {
+        void run() throws IOException;
+    }
+
+    /**
+     * A new update was built: {@code publish} puts it in staging/. It runs under the same lock
+     * as the countdown, so the restart never lands while staging/ is being swapped (the start
+     * script would find nothing to apply and players would be kicked for nothing). If the
+     * countdown of an older update is running, the restart applies this newer one.
+     *
+     * @return false if a restart is already under way: staging/ is left alone and the commit is
+     *     built again after the restart
+     */
+    synchronized boolean onStaged(String commit, List<String> changes, StagingChange publish) throws IOException {
+        if (shuttingDown.get()) {
+            return false;
+        }
+        publish.run();
         pendingCommit = commit;
         pendingChanges = changes;
         held = false;
@@ -77,7 +96,7 @@ final class RestartController {
             messages.notifyAdmins("<yellow>Update <white><sha></white> is ready, but the server wasn't started by "
                     + "the start script, so it won't restart on its own.</yellow> <gray>Stop it and start it with "
                     + "scripts/start.sh (or start.ps1) to apply it.</gray>", "sha", Messages.shortSha(commit));
-            return;
+            return true;
         }
 
         String when = switch (config.restartMode()) {
@@ -92,10 +111,20 @@ final class RestartController {
                             + "Restart <when>. See <white>/changelog</white>.</gray>",
                     "sha", Messages.shortSha(commit), "n", String.valueOf(changes.size()), "when", when);
         }
+        return true;
     }
 
-    /** The staging was discarded (e.g. a revert left the remote equal to what's already running). */
-    synchronized void clearPending() {
+    /**
+     * The update waiting in staging/ is no longer needed (e.g. a revert left the remote equal to
+     * what's already running): {@code discard} removes it, under the countdown's lock.
+     *
+     * @return false if a restart is already under way (it applies the staging as it is)
+     */
+    synchronized boolean clearPending(StagingChange discard) throws IOException {
+        if (shuttingDown.get()) {
+            return false;
+        }
+        discard.run();
         pendingCommit = null;
         pendingChanges = List.of();
         // An admin's /core restart stays: they asked for a restart, not for an update.
@@ -103,6 +132,7 @@ final class RestartController {
             restartAt = null;
             messages.broadcast("<yellow>Restart cancelled: there's nothing left to apply.</yellow>");
         }
+        return true;
     }
 
     /**

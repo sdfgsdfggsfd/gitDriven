@@ -117,6 +117,7 @@ Don't touch them unless the task is specifically about them:
 
 - `plugins/core/` — if Core breaks, the server stops updating itself.
 - `build.gradle.kts`, `settings.gradle.kts`, `gradle/`, `gradlew*` — they run on the server machine.
+  Same for every plugin's own `build.gradle.kts`, `gradle.properties` and `buildSrc/`.
 - `scripts/`, `.github/` — deploy and CI infrastructure.
 
 Never change the Gradle Wrapper or the Folia API version "in passing" in a feature PR.
