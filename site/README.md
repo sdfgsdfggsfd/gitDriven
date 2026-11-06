@@ -27,7 +27,8 @@ textures over `file://`.
 ## Notes
 
 - The changelog calls the public GitHub API from the visitor's browser (60 requests per
-  hour per visitor, cached for 5 minutes). If GitHub is unreachable, the page says so and
-  links to GitHub.
+  hour per visitor). Answers are kept in `localStorage` for 5 minutes; if GitHub fails
+  later, the page shows the last copy it has and says how old it is. With no copy at all,
+  it says GitHub is unreachable and links there.
 - Text from GitHub is inserted with `textContent`, never as HTML. Keep it that way.
 - Everything in English, like the rest of the repo.
