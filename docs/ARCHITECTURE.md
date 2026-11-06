@@ -40,12 +40,15 @@ Every `poll-interval-seconds` (60 s), on its own thread, never on a game thread:
 4. **Docs only?** If *all* files changed since the production commit match
    `ignore-paths` (`**.md`, `docs/**`, `.github/**`, `site/**`), mark it as applied, with no build
    and no restart.
-5. **Build.** `checkout` of the commit + `gradlew build collectServerPlugins --no-daemon`
+5. **Check `server/`.** Everything in it is copied over the server root, so only config
+   files may be there (rules in [server/README.md](../server/README.md)). A commit that
+   breaks them is refused like a failed build, before Gradle runs.
+6. **Build.** `checkout` of the commit + `gradlew build collectServerPlugins --no-daemon`
    with the same Java as the server. Full output in `.git-driven/last-build.log`.
    Failed: notify everyone with `core.admin`; the server stays on the current version.
-6. **Staging.** Copy `build/server-plugins/*.jar` and the `server/` folder into
+7. **Staging.** Copy `build/server-plugins/*.jar` and the `server/` folder into
    `.git-driven/staging/`, write `COMMIT`, `CHANGES.txt` and, last, `READY`.
-7. **Restart.** Announce it in chat and hand over to the `RestartController` (next section).
+8. **Restart.** Announce it in chat and hand over to the `RestartController` (next section).
 
 If another merge lands while an update is waiting for the restart, Core builds the
 new commit and replaces the staging. The tip of `main` is always what goes to the server.
@@ -101,8 +104,11 @@ Before every boot, if `staging/READY` exists, the script (`start.sh` / `start.ps
 3. Copies `staging/files/` over the server root.
 4. Writes `deployed-commit` and `last-changes.txt` and deletes the staging.
 
-If the server starts without the script, Core notices the unapplied staging, logs an
-error and does **not** schedule a restart (to avoid a loop).
+The script sets `GIT_DRIVEN_LAUNCHER` for the server. If it's missing (the server was
+started without the script), nothing would start the server again after a shutdown, so
+Core never restarts it: updates are built and wait, `/core restart` is refused, and
+`/core status` and the console say why. If a staging is found unapplied at boot, Core
+logs an error and does not schedule a restart (to avoid a loop).
 
 ## Building on the server (not in CI)
 

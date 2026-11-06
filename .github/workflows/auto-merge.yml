@@ -2,6 +2,13 @@
 # branch ruleset allows it: approval from a CODEOWNER + a green "build" check.
 # Result: approved PR = merged PR = Core updates the server.
 #
+# Fail-safe: this workflow NEVER merges by itself. It only turns on GitHub's auto-merge
+# (enablePullRequestAutoMerge), which GitHub refuses when nothing is blocking the merge.
+# And it does nothing unless the base branch has an active ruleset that requires an
+# approving review. (`gh pr merge --auto` is not used on purpose: when a PR has nothing
+# blocking it, it merges right away — with no ruleset, any PR would go straight to the
+# server.)
+#
 # Token: GitHub doesn't start workflows from events caused by the default GITHUB_TOKEN,
 # so a merge done by auto-merge enabled with it would not run "Website" or "Build" on
 # main (website changes from PRs would never get published). With the AUTOMERGE_TOKEN
@@ -31,12 +38,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
           PR: ${{ github.event.pull_request.number }}
+          PR_ID: ${{ github.event.pull_request.node_id }}
+          BASE: ${{ github.event.pull_request.base.ref }}
           REPO: ${{ github.repository }}
         run: |
           set -eu
+          reviews=$(gh api "repos/$REPO/rules/branches/$BASE" \
+            --jq '[.[] | select(.type == "pull_request" and .parameters.required_approving_review_count >= 1)] | length')
+          if [ "$reviews" -eq 0 ]; then
+            echo "::error::'$BASE' has no active ruleset requiring an approving review. Auto-merge stays off," \
+              "otherwise PRs would reach the server unreviewed. Set it up as in docs/MAINTAINERS.md."
+            exit 1
+          fi
+
           enabled=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')
           if [ "$enabled" = "true" ]; then
             echo "Auto-merge is already on for #$PR."
-          else
-            gh pr merge "$PR" --repo "$REPO" --auto --squash
+            exit 0
           fi
+          # Only enables auto-merge; never merges directly. GitHub refuses it if the PR has
+          # nothing blocking it ("clean status"): then a maintainer merges by hand.
+          gh api graphql \
+            -f query='mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { clientMutationId } }' \
+            -f id="$PR_ID" > /dev/null
+          echo "Auto-merge enabled for #$PR."

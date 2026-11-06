@@ -4,8 +4,10 @@
 
 *                     @sdfgsdfggsfd
 
-# Sensitive areas: the updater, the build and the automation run on the server machine.
+# Sensitive areas: the updater, the build and the automation run on the server machine,
+# and server/ is copied over the server root.
 /plugins/core/        @sdfgsdfggsfd
+/server/              @sdfgsdfggsfd
 /build.gradle.kts     @sdfgsdfggsfd
 /settings.gradle.kts  @sdfgsdfggsfd
 /gradle/              @sdfgsdfggsfd

@@ -23,6 +23,11 @@ and Core deploys on its own. There is no "now push it to production" step.
 Without "dismiss stale approvals", someone could push after the approval and
 auto-merge would ship the new code unreviewed.
 
+**Do this before anything else.** Until this ruleset exists, the `Auto-merge` workflow
+refuses to run (it fails with "no active ruleset requiring an approving review") and
+nothing gets merged automatically. That's on purpose: without the ruleset, any PR from
+anyone would reach the server unreviewed.
+
 **Solo owner:** GitHub doesn't let you approve your own PR. While
 [@sdfgsdfggsfd](https://github.com/sdfgsdfggsfd) is the only code owner, add the
 **Repository admin** role to the ruleset's **Bypass list** (so you can merge your own
@@ -71,6 +76,10 @@ with the URL can post to the channel.
 - [ ] Nothing heavy per tick, nothing that grows without bounds (lists, maps, entities).
 - [ ] Touches `*.gradle.kts`, `gradle/`, `scripts/` or `.github/`? That runs **on the
       server machine**: read it line by line.
+- [ ] Touches `server/`? It's copied over the server root. Core already refuses jars,
+      scripts, Core settings and ops/whitelist/bans, but configs can still give power:
+      RCON/query, `online-mode`, proxy forwarding (`spigot.yml` bungeecord, `proxies` in
+      `paper-global.yml`), `permissions.yml`. Read every line.
 - [ ] Does it give someone permissions or power? It must be written in the description.
 - [ ] No secrets, no network calls to strange hosts, no external processes.
 
@@ -85,9 +94,18 @@ revert like any other change. If the server doesn't come up, see
 
 ## Changing the restart policy
 
-Version `server/plugins/Core/config.yml` (copy the default from
-`plugins/core/src/main/resources/config.yml`) and change `restart.mode`. It takes effect
-from the restart that applies that PR. Options in [ARCHITECTURE.md](ARCHITECTURE.md#restart-policy).
+Version `server/plugins/Core/restart.yml` with the keys of the `restart:` section of
+`plugins/core/src/main/resources/config.yml`, without the `restart:` level:
+
+```yaml
+mode: daily
+daily-time-utc: "04:00"
+```
+
+It takes effect from the restart that applies that PR. Options in
+[ARCHITECTURE.md](ARCHITECTURE.md#restart-policy). Core's `config.yml` itself can't be
+versioned (Core refuses the commit): the repository and build settings stay on the server,
+so a merge can never point Core somewhere else or break its updates.
 
 ## Daily recap
 

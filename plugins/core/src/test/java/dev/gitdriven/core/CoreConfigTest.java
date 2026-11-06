@@ -86,6 +86,36 @@ class CoreConfigTest {
     }
 
     @Test
+    void restartValuesAreCapped() throws Exception {
+        CoreConfig c = load("restart: {debounce-minutes: 999999, countdown-seconds: 999999}");
+        assertEquals(Duration.ofDays(1), c.debounce());
+        assertEquals(CoreConfig.MAX_COUNTDOWN_SECONDS, c.countdownSeconds());
+    }
+
+    /** restart.yml (deployable from the repo) only touches the restart section. */
+    @Test
+    void restartFileCannotChangeRepositoryOrBuild() throws Exception {
+        YamlConfiguration server = new YamlConfiguration();
+        server.loadFromString("repository: {url: \"https://example.com/mine.git\"}\nrestart: {countdown-seconds: 30}\n");
+        YamlConfiguration restartFile = new YamlConfiguration();
+        restartFile.loadFromString("""
+                mode: daily
+                daily-time-utc: "04:00"
+                repository: {url: "https://example.com/evil.git"}
+                build: {args: ["evil"]}
+                """);
+        CoreConfig.applyRestartFile(server, restartFile, log);
+        CoreConfig c = load(server.saveToString());
+
+        assertEquals("https://example.com/mine.git", c.repoUrl());
+        assertEquals(CoreConfig.DEFAULT_BUILD_ARGS, c.buildArgs());
+        assertEquals(CoreConfig.RestartMode.DAILY, c.restartMode());
+        assertEquals(LocalTime.of(4, 0), c.dailyTimeUtc());
+        assertEquals(30, c.countdownSeconds());
+        assertEquals(2, warnings.size(), warnings.toString());
+    }
+
+    @Test
     void modeIsCaseInsensitive() throws Exception {
         assertEquals(CoreConfig.RestartMode.DAILY, load("restart: {mode: \" Daily \"}").restartMode());
     }

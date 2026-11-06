@@ -57,10 +57,18 @@ final class Builder {
             throw new IOException("The build produced no jars in " + config.artifactsDir());
         }
 
-        Path serverFiles = repoDir.resolve(config.serverFilesDir());
+        // UpdateService already refused the commit if server/ breaks the rules; checked again
+        // here so nothing reaches staging/ without passing ServerFiles.
+        ServerFiles.Scan scan = ServerFiles.scan(repoDir.resolve(config.serverFilesDir()));
+        if (!scan.ok()) {
+            throw new IOException("Files in " + config.serverFilesDir() + "/ that can't go to the server: "
+                    + scan.problems());
+        }
         Path filesOut = Files.createDirectories(tmp.resolve("files"));
-        if (Files.isDirectory(serverFiles)) {
-            copyTree(serverFiles, filesOut);
+        for (String rel : scan.files()) {
+            Path dst = filesOut.resolve(rel);
+            Files.createDirectories(dst.getParent());
+            Files.copy(repoDir.resolve(config.serverFilesDir()).resolve(rel), dst, StandardCopyOption.REPLACE_EXISTING);
         }
 
         Files.writeString(tmp.resolve("COMMIT"), commit + "\n");
@@ -69,28 +77,5 @@ final class Builder {
         state.clearStaging();
         Files.move(tmp, state.stagingDir());
         Files.writeString(state.stagingDir().resolve("READY"), commit + "\n");
-    }
-
-    private static void copyTree(Path from, Path to) throws IOException {
-        try (Stream<Path> walk = Files.walk(from)) {
-            for (Path src : walk.toList()) {
-                Path rel = from.relativize(src);
-                if (isDocFile(rel)) {
-                    continue;
-                }
-                Path dst = to.resolve(rel.toString());
-                if (Files.isDirectory(src)) {
-                    Files.createDirectories(dst);
-                } else {
-                    Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-        }
-    }
-
-    /** README.md and .gitkeep files from server/ don't go to the server. */
-    private static boolean isDocFile(Path rel) {
-        String name = rel.getFileName() == null ? "" : rel.getFileName().toString();
-        return name.equals(".gitkeep") || (rel.getNameCount() == 1 && name.equalsIgnoreCase("README.md"));
     }
 }

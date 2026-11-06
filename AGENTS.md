@@ -107,7 +107,8 @@ must still be named `<name>.jar` and be the output of the `jar` task.
 
 **Configs:** default values go in the `config.yml` inside the jar (`saveDefaultConfig()`).
 To pin a value on the server, version it in `server/plugins/<PluginName>/config.yml`.
-See [server/README.md](server/README.md).
+Only config files are allowed there (no jars or scripts, nothing in `plugins/Core/` but
+`restart.yml`); Core refuses the commit otherwise. See [server/README.md](server/README.md).
 
 ## Protected areas
 

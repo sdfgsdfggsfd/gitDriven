@@ -14,6 +14,9 @@ param(
     [switch]$ApplyOnly
 )
 $ErrorActionPreference = "Stop"
+# Tells Core that this loop will start the server again after it shuts down. Without it,
+# Core never restarts the server by itself (it would just stay off).
+$env:GIT_DRIVEN_LAUNCHER = "start.ps1"
 $root = (Get-Location).Path
 $gd = Join-Path $root ".git-driven"
 
