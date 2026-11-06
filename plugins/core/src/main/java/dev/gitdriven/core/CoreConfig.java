@@ -7,14 +7,16 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Logger;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
 /**
- * Immutable configuration read from config.yml.
+ * Immutable configuration read from config.yml (+ restart.yml).
  *
- * <p>Loading never throws: an invalid value falls back to its default with a warning. A typo
- * merged into {@code server/plugins/Core/config.yml} must not disable Core, otherwise the
- * server would stop updating itself and the fix could never be deployed.
+ * <p>config.yml lives only on the server: the repository can't overwrite it, so a merge can't
+ * point Core at another repository or break the build settings. A merge can only change the
+ * restart policy, through restart.yml. Loading never throws: an invalid value falls back to its
+ * default with a warning, so a typo never stops the server from updating itself.
  */
 record CoreConfig(
         String repoUrl,
@@ -35,6 +37,11 @@ record CoreConfig(
 
     static final List<String> DEFAULT_BUILD_ARGS =
             List.of("build", "collectServerPlugins", "--no-daemon", "--console=plain");
+
+    static final List<String> RESTART_KEYS =
+            List.of("mode", "debounce-minutes", "daily-time-utc", "countdown-seconds", "apply-when-empty");
+    static final long MAX_DEBOUNCE_MINUTES = 24 * 60;
+    static final int MAX_COUNTDOWN_SECONDS = 600;
 
     // "0:00", "00:00" and "00:00:00" are all accepted.
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("H:mm[:ss]", Locale.ROOT);
@@ -57,10 +64,28 @@ record CoreConfig(
                 text(c, "build.server-files-dir", "server"),
                 new PathGlob(c.getStringList("build.ignore-paths")),
                 mode(text(c, "restart.mode", "debounce"), log),
-                Duration.ofMinutes(Math.max(0, c.getLong("restart.debounce-minutes", 10))),
+                // Capped so no value can hold updates back for more than a day.
+                Duration.ofMinutes(Math.clamp(c.getLong("restart.debounce-minutes", 10), 0, MAX_DEBOUNCE_MINUTES)),
                 time(c.get("restart.daily-time-utc", "00:00"), log),
-                Math.max(0, c.getInt("restart.countdown-seconds", 60)),
+                Math.clamp(c.getInt("restart.countdown-seconds", 60), 0, MAX_COUNTDOWN_SECONDS),
                 c.getBoolean("restart.apply-when-empty", true));
+    }
+
+    /**
+     * Applies {@code plugins/Core/restart.yml}, the only Core file a merge can deploy
+     * (see {@link ServerFiles}), on top of the {@code restart} section. Its keys are those of
+     * that section, without the {@code restart:} level. Anything else in it is ignored, so a
+     * merge can never change which repository Core follows or how it builds.
+     */
+    static void applyRestartFile(ConfigurationSection target, ConfigurationSection restartFile, Logger log) {
+        for (String key : restartFile.getKeys(false)) {
+            if (RESTART_KEYS.contains(key)) {
+                target.set("restart." + key, restartFile.get(key));
+            } else {
+                log.warning("restart.yml: '" + key + "' is not a restart setting (" + String.join(", ", RESTART_KEYS)
+                        + "); ignored.");
+            }
+        }
     }
 
     boolean isPlaceholderRepo() {

@@ -27,6 +27,10 @@ Install once; after that the server keeps itself up to date from the repository.
    The name must be `core.jar`, so later versions of Core replace this one.
 
 4. **Start script.** Copy `scripts/start.sh` (or `start.ps1`) into the server folder.
+   Always start the server through it: it sets `GIT_DRIVEN_LAUNCHER`, and without that
+   variable Core never restarts the server (nothing would start it again). Updates are
+   then built but wait, and `/core status` says so. After a change to `scripts/`, copy
+   the script again (it doesn't update itself).
 
 5. **Start it.** From inside the server folder:
    ```sh
@@ -74,6 +78,9 @@ the repo) for the console.
 | `RESTART_DELAY` | `5` | seconds between stopping and starting again |
 
 `start.sh --apply-only` (or `start.ps1 -ApplyOnly`) only applies the staging and exits.
+If you use it as `ExecStartPre` and start Java directly from systemd (with
+`Restart=always`), also set `Environment=GIT_DRIVEN_LAUNCHER=systemd`, so Core knows
+something will start the server again.
 
 ## In-game/console commands
 
@@ -87,14 +94,19 @@ the repo) for the console.
 
 ## Core configuration
 
-It lives in `plugins/Core/config.yml` (the default comes from the jar). To version it,
-put the file in `server/plugins/Core/config.yml` in the repo: it then overwrites the
-server's copy on every deploy. Options are explained in the file itself and in
-[ARCHITECTURE.md](ARCHITECTURE.md#restart-policy).
+It lives in `plugins/Core/config.yml` (the default comes from the jar) and **only on the
+server**: the repository can't overwrite it (Core refuses a commit that tries). So the
+repository URL, branch and build settings can only be changed on the machine, and a merge
+can't send Core to another repository or break its updates.
+
+The restart policy can be versioned: `server/plugins/Core/restart.yml` holds the keys of
+the `restart:` section (without that level) and overrides them. Options are explained in
+the default `config.yml` and in [ARCHITECTURE.md](ARCHITECTURE.md#restart-policy).
 
 An invalid value (a typo in `restart.mode`, a time like `25:00`) never disables Core: it
-falls back to the default and logs a warning at startup, so a bad config merge can still be
-fixed with another merge. Check the console after changing it.
+falls back to the default and logs a warning at startup. `debounce-minutes` is capped at
+one day and `countdown-seconds` at 600, so no restart setting can hold updates back
+indefinitely. Check the console after changing it.
 
 ## Updating the Folia version
 
@@ -141,4 +153,8 @@ is running:
 - Run it as a **dedicated user without sudo**, preferably in a container or VM.
 - Don't keep anything sensitive on that machine/user (SSH keys for other places, tokens).
 - Secrets (RCON, webhooks) live only on the server, never in `server/` in the repo.
-- Approvers: extra attention on PRs that touch `*.gradle.kts`, `gradle/` and `scripts/`.
+  Core refuses a `server.properties` with `rcon.password` or `management-server-secret` set.
+- `server/` only deploys config files: Core refuses commits that put jars, scripts, hidden
+  files, Core's `config.yml` or `ops.json`/whitelist/bans there (rules in
+  [server/README.md](../server/README.md)).
+- Approvers: extra attention on PRs that touch `*.gradle.kts`, `gradle/`, `scripts/` and `server/`.

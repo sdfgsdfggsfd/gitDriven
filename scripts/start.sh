@@ -14,6 +14,9 @@ JAVA="${JAVA:-java}"
 JAVA_ARGS="${JAVA_ARGS:-}"
 RESTART_DELAY="${RESTART_DELAY:-5}"
 GD=".git-driven"
+# Tells Core that this loop will start the server again after it shuts down. Without it,
+# Core never restarts the server by itself (it would just stay off).
+export GIT_DRIVEN_LAUNCHER="start.sh"
 
 apply_update() {
   [ -f "$GD/staging/READY" ] || return 0

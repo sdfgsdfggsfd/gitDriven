@@ -160,6 +160,20 @@ final class UpdateService {
         git.checkout(remote);
         List<String> changes = git.log(deployedKnown ? deployed : null, remote, deployedKnown ? MAX_CHANGES : 10);
 
+        // Before the build: a commit that would put jars, scripts or Core settings on the
+        // server is refused like a broken build (and not rebuilt every minute).
+        List<String> rejected = ServerFiles.scan(git.dir().resolve(config.serverFilesDir())).problems();
+        if (!rejected.isEmpty()) {
+            failedCommit = remote;
+            failedMessage = Messages.shortSha(remote) + " rejected: " + rejected.getFirst();
+            lastError = failedMessage;
+            log.warning("Commit " + remote + " puts files on the server that are not allowed. The server stays on "
+                    + "the current version. Fix or revert it:\n  " + String.join("\n  ", rejected));
+            messages.notifyAdmins("<red>Update <white><sha></white> rejected:</red> <gray><why></gray>",
+                    "sha", Messages.shortSha(remote), "why", rejected.getFirst());
+            return;
+        }
+
         ProcessRunner.Result result = builder.build(git.dir(), remote);
         if (!result.ok()) {
             failedCommit = remote;

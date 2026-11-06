@@ -44,7 +44,11 @@ final class CoreCommands implements TabExecutor {
                         return true;
                     }
                 }
-                plugin.restart().restartIn(secs);
+                if (!plugin.restart().restartIn(secs)) {
+                    Messages.send(sender, "<red>This server wasn't started by scripts/start.sh or start.ps1: after "
+                            + "a restart nothing would start it again.</red> <gray>Use /stop and start it with the "
+                            + "script.</gray>");
+                }
             }
             case "cancel" -> {
                 if (!plugin.restart().cancel()) {
@@ -65,6 +69,10 @@ final class CoreCommands implements TabExecutor {
                 "p", st.stagedCommit().map(Messages::shortSha).orElse("—"));
         Messages.send(s, "<gray>Restart: <white><r></white> · mode: <white><m></white></gray>",
                 "r", rc.describeSchedule(), "m", plugin.config().restartMode().name().toLowerCase(Locale.ROOT));
+        if (!rc.supervised()) {
+            Messages.send(s, "<red>Not started by the start script: updates are built but not applied "
+                    + "automatically.</red>");
+        }
         if (up == null) {
             Messages.send(s, "<red>Updater disabled: repository.url is not configured.</red>");
             return;

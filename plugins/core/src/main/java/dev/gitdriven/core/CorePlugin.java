@@ -1,11 +1,13 @@
 package dev.gitdriven.core;
 
+import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -18,6 +20,8 @@ import org.bukkit.plugin.java.JavaPlugin;
  * Overview in docs/ARCHITECTURE.md.
  */
 public final class CorePlugin extends JavaPlugin implements Listener {
+    static final String LAUNCHER_ENV = "GIT_DRIVEN_LAUNCHER";
+
     private CoreConfig config;
     private DeployState state;
     private RestartController restart;
@@ -30,7 +34,20 @@ public final class CorePlugin extends JavaPlugin implements Listener {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        // The only Core file the repository can deploy (server/plugins/Core/restart.yml).
+        File restartFile = new File(getDataFolder(), "restart.yml");
+        if (restartFile.isFile()) {
+            CoreConfig.applyRestartFile(getConfig(), YamlConfiguration.loadConfiguration(restartFile), getLogger());
+        }
         config = CoreConfig.load(getConfig(), getLogger());
+        // Set by scripts/start.sh and start.ps1: something will start the server again after
+        // Core shuts it down. Without it, Core never restarts the server by itself.
+        String launcher = System.getenv(LAUNCHER_ENV);
+        boolean supervised = launcher != null && !launcher.isBlank();
+        if (!supervised) {
+            getLogger().warning(LAUNCHER_ENV + " is not set: this server was not started by scripts/start.sh or "
+                    + "start.ps1. Core will build updates but won't restart the server to apply them.");
+        }
         // The working directory is the server root (the start scripts guarantee that).
         state = new DeployState(Path.of("").toAbsolutePath().resolve(".git-driven"));
         seenKey = new NamespacedKey(this, "seen-commit");
@@ -38,7 +55,7 @@ public final class CorePlugin extends JavaPlugin implements Listener {
         bootChanges = state.lastChanges();
 
         Messages messages = new Messages(this);
-        restart = new RestartController(this, config, messages);
+        restart = new RestartController(this, config, messages, supervised);
         restart.start();
 
         CoreCommands commands = new CoreCommands(this);

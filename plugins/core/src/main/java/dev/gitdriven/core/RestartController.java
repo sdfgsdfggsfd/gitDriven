@@ -18,7 +18,9 @@ import org.bukkit.plugin.Plugin;
  * Decides WHEN to restart to apply an update that has already been built (staging/READY).
  * An async tick every second evaluates the configured mode and drives the countdown.
  * The restart itself is just a {@code Bukkit.shutdown()}: applying the files and starting
- * the server again is the start script's job (scripts/start.sh or start.ps1).
+ * the server again is the start script's job (scripts/start.sh or start.ps1). Without the
+ * script ({@code supervised == false}) nothing would start the server again, so Core never
+ * shuts it down: the update waits until someone restarts it with the script.
  */
 final class RestartController {
     private static final int[] ANNOUNCE_AT = {600, 300, 120, 60, 30, 15, 10, 5, 4, 3, 2, 1};
@@ -26,6 +28,7 @@ final class RestartController {
     private final Plugin plugin;
     private final CoreConfig config;
     private final Messages messages;
+    private final boolean supervised;
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
 
     private volatile String pendingCommit;
@@ -38,10 +41,15 @@ final class RestartController {
     private int lastAnnounced = Integer.MAX_VALUE;
     private ScheduledTask task;
 
-    RestartController(Plugin plugin, CoreConfig config, Messages messages) {
+    RestartController(Plugin plugin, CoreConfig config, Messages messages, boolean supervised) {
         this.plugin = plugin;
         this.config = config;
         this.messages = messages;
+        this.supervised = supervised;
+    }
+
+    boolean supervised() {
+        return supervised;
     }
 
     void start() {
@@ -61,6 +69,16 @@ final class RestartController {
         pendingChanges = changes;
         held = false;
         debounceDeadline = Instant.now().plus(config.debounce());
+
+        if (!supervised) {
+            plugin.getLogger().warning("Update " + Messages.shortSha(commit) + " is ready, but this server was not "
+                    + "started by scripts/start.sh or start.ps1: nothing would start it again, so Core won't restart "
+                    + "it. Stop the server and start it with the script to apply the update.");
+            messages.notifyAdmins("<yellow>Update <white><sha></white> is ready, but the server wasn't started by "
+                    + "the start script, so it won't restart on its own.</yellow> <gray>Stop it and start it with "
+                    + "scripts/start.sh (or start.ps1) to apply it.</gray>", "sha", Messages.shortSha(commit));
+            return;
+        }
 
         String when = switch (config.restartMode()) {
             case IMMEDIATE -> "in " + config.countdownSeconds() + "s";
@@ -87,11 +105,19 @@ final class RestartController {
         }
     }
 
-    /** /core restart [seconds] — works even without a pending update. */
-    synchronized void restartIn(int seconds) {
+    /**
+     * /core restart [seconds] — works even without a pending update.
+     *
+     * @return false without the start script (the server would just stay off)
+     */
+    synchronized boolean restartIn(int seconds) {
+        if (!supervised) {
+            return false;
+        }
         held = false;
         beginCountdown(Instant.now().plusSeconds(Math.max(0, seconds)));
         manual = true;
+        return true;
     }
 
     /** /core cancel */
@@ -128,6 +154,9 @@ final class RestartController {
         if (pendingCommit == null) {
             return "nothing pending";
         }
+        if (!supervised) {
+            return "pending, waiting for a restart with the start script";
+        }
         if (held) {
             return "pending, postponed by an admin";
         }
@@ -147,7 +176,7 @@ final class RestartController {
         if (!now.isBefore(nextDaily)) {
             nextDaily = nextDaily(now, config.dailyTimeUtc());
         }
-        if (pendingCommit == null || held) {
+        if (pendingCommit == null || held || !supervised) {
             return;
         }
         if (config.applyWhenEmpty() && Bukkit.getOnlinePlayers().isEmpty()) {
