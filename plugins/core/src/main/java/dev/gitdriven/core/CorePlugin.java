@@ -77,7 +77,8 @@ public final class CorePlugin extends JavaPlugin implements Listener {
         updates = new UpdateService(config, state, new ProcessRunner(), restart, messages, getLogger());
         long period = config.pollInterval().toSeconds();
         Bukkit.getAsyncScheduler().runAtFixedRate(this, t -> updates.requestCheck(false), 15, period, TimeUnit.SECONDS);
-        getLogger().info("Watching " + config.repoUrl() + " (" + config.branch() + ") every " + period + "s. "
+        getLogger().info("Watching " + config.repoUrl() + " (" + config.branch() + ") every " + period + "s, jars "
+                + (config.buildSource() == CoreConfig.BuildSource.CI ? "from " + config.ciUrl() : "built here") + ". "
                 + "In production: " + Messages.shortSha(bootCommit));
     }
 

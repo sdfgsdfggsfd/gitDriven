@@ -13,7 +13,7 @@ approved: a few minutes later it's on the server. No manual deploys, no admin in
                                                           │
                                                           ▼  git fetch every 60s
                                             ┌──── Core (plugin on the server) ───┐
-                                            │ checkout → gradlew build → staging │
+                                            │ checkout + jars from CI → staging  │
                                             └──────────────┬─────────────────────┘
                                                            ▼
                         chat notice → restart → start script applies → server is back
@@ -21,7 +21,8 @@ approved: a few minutes later it's on the server. No manual deploys, no admin in
                             00:00 UTC: the day's recap is published as a Release
 ```
 
-- **Core** (`plugins/core`) is the plugin that pulls the repo, builds it and prepares the update.
+- **Core** (`plugins/core`) is the plugin that pulls the repo, downloads the jars CI built for it
+  and prepares the update.
 - The **restart** happens 10 min after the last merge (batching merges that land close
   together), or right away if the server is empty. It can be switched to "immediate"
   or "only at midnight UTC".

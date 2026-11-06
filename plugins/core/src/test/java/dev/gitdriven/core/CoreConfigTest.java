@@ -97,7 +97,7 @@ class CoreConfigTest {
     @Test
     void restartFileCannotChangeRepositoryOrBuild() throws Exception {
         YamlConfiguration server = new YamlConfiguration();
-        server.loadFromString("repository: {url: \"https://example.com/mine.git\"}\nrestart: {countdown-seconds: 30}\n");
+        server.loadFromString("repository: {url: \"https://github.com/me/mine.git\"}\nrestart: {countdown-seconds: 30}\n");
         YamlConfiguration restartFile = new YamlConfiguration();
         restartFile.loadFromString("""
                 mode: daily
@@ -108,12 +108,41 @@ class CoreConfigTest {
         CoreConfig.applyRestartFile(server, restartFile, log);
         CoreConfig c = load(server.saveToString());
 
-        assertEquals("https://example.com/mine.git", c.repoUrl());
+        assertEquals("https://github.com/me/mine.git", c.repoUrl());
         assertEquals(CoreConfig.DEFAULT_BUILD_ARGS, c.buildArgs());
         assertEquals(CoreConfig.RestartMode.DAILY, c.restartMode());
         assertEquals(LocalTime.of(4, 0), c.dailyTimeUtc());
         assertEquals(30, c.countdownSeconds());
         assertEquals(2, warnings.size(), warnings.toString());
+    }
+
+    @Test
+    void jarsComeFromCiByDefault() throws Exception {
+        CoreConfig c = load("");
+        assertEquals(CoreConfig.BuildSource.CI, c.buildSource());
+        assertEquals("https://github.com/sdfgsdfggsfd/gitDriven/releases/download/server-build/"
+                + "server-plugins-{commit}.zip", c.ciUrl());
+        assertEquals(c.ciUrl(), load("repository: {url: \"https://github.com/sdfgsdfggsfd/gitDriven\"}").ciUrl());
+        assertEquals(CoreConfig.BuildSource.LOCAL, load("build: {source: local}").buildSource());
+        assertTrue(warnings.isEmpty(), warnings.toString());
+    }
+
+    @Test
+    void ciWithoutAUsableUrlBuildsLocally() throws Exception {
+        CoreConfig gitlab = load("repository: {url: \"https://gitlab.com/me/server.git\"}");
+        assertEquals(CoreConfig.BuildSource.LOCAL, gitlab.buildSource());
+        assertEquals(1, warnings.size(), warnings.toString());
+
+        CoreConfig custom = load("""
+                repository: {url: "https://gitlab.com/me/server.git"}
+                build: {ci-url: "https://example.com/builds/{commit}.zip"}
+                """);
+        assertEquals(CoreConfig.BuildSource.CI, custom.buildSource());
+        assertEquals("https://example.com/builds/{commit}.zip", custom.ciUrl());
+
+        // No {commit}: ignored, the GitHub default is used.
+        assertTrue(load("build: {ci-url: \"https://example.com/latest.zip\"}").ciUrl().startsWith("https://github.com/"));
+        assertEquals(CoreConfig.BuildSource.CI, load("build: {source: cloud}").buildSource());
     }
 
     /** "**.md" also matches .md files a plugin packs into its jar: those still need a build. */

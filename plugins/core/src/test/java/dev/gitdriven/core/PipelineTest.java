@@ -59,7 +59,7 @@ class PipelineTest {
         Path artifacts = Files.createDirectories(state.repoDir().resolve("build/server-plugins"));
         Files.writeString(artifacts.resolve("core.jar"), "fake");
         Builder builder = new Builder(config(), state, runner);
-        builder.prepare(state.repoDir(), code, log);
+        builder.prepare(state.repoDir(), artifacts, code, log);
         assertTrue(state.stagedCommit().isEmpty(), "nothing is staged until publish()");
         builder.publish();
 
@@ -82,12 +82,12 @@ class PipelineTest {
         Builder builder = new Builder(config(), state, runner);
 
         Files.writeString(artifacts.resolve("old.jar"), "1");
-        builder.prepare(repo, "aaa", List.of("aaa First"));
+        builder.prepare(repo, artifacts, "aaa", List.of("aaa First"));
         builder.publish();
 
         Files.delete(artifacts.resolve("old.jar"));
         Files.writeString(artifacts.resolve("new.jar"), "2");
-        builder.prepare(repo, "bbb", List.of("bbb Second"));
+        builder.prepare(repo, artifacts, "bbb", List.of("bbb Second"));
         assertEquals("aaa", state.stagedCommit().orElseThrow());
         assertTrue(Files.exists(state.stagingDir().resolve("plugins/old.jar")));
 
@@ -185,6 +185,6 @@ class PipelineTest {
     private static CoreConfig config() {
         return new CoreConfig("file://x", "main", Duration.ofSeconds(60), List.of(), Duration.ofMinutes(1),
                 "build/server-plugins", "server", new PathGlob(List.of()), CoreConfig.RestartMode.DEBOUNCE,
-                Duration.ofMinutes(10), LocalTime.MIDNIGHT, 60, true);
+                Duration.ofMinutes(10), LocalTime.MIDNIGHT, 60, true, CoreConfig.BuildSource.LOCAL, "");
     }
 }

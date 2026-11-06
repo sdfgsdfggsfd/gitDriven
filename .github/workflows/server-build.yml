@@ -1,0 +1,123 @@
+# Builds the jars the server installs and publishes them on the "server-build" release as
+# server-plugins-<full sha>.zip (the jars + a COMMIT file). Core downloads the zip of the commit
+# at the tip of main, so Gradle never runs on the server machine.
+#
+# Why a schedule: merges done by auto-merge use the default GITHUB_TOKEN, and GitHub doesn't
+# start workflows from those, so "push" alone would miss them. Every 10 minutes it checks the
+# tip of main and builds it if it isn't published yet (GitHub's schedule can run late).
+# "push" covers merges done by hand. GitHub disables schedules after 60 days without
+# activity in the repository: re-enable it in Actions if that happens.
+#
+# The build runs with a read-only token; only the publish job, which runs no code from the
+# repository, can write to the release.
+name: Server build
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: server-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BRANCH: main
+  TAG: server-build
+  KEEP: 10 # builds kept on the release; older ones are deleted
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+      published: ${{ steps.head.outputs.published }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          sha=$(gh api "repos/$REPO/commits/$BRANCH" --jq .sha)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null \
+              | grep -qx "server-plugins-$sha.zip"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "$sha is already published."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.published == 'false'
+    runs-on: ubuntu-latest
+    env:
+      SHA: ${{ needs.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build + tests
+        env:
+          GIT_DRIVEN_COMMIT: ${{ needs.check.outputs.sha }} # plugin.yml version, like on the server
+        run: |
+          chmod +x gradlew
+          ./gradlew build collectServerPlugins --console=plain
+
+      - name: Package
+        run: |
+          set -eu
+          cd build/server-plugins
+          printf '%s\n' "$SHA" > COMMIT
+          zip -q -X "$GITHUB_WORKSPACE/server-plugins-$SHA.zip" *.jar COMMIT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-build
+          path: server-plugins-${{ needs.check.outputs.sha }}.zip
+          retention-days: 1
+
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ needs.check.outputs.sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-build
+
+      - name: Publish on the server-build release
+        run: |
+          set -eu
+          if ! gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" --prerelease --target "$SHA" --title "Server build" \
+              --notes "Plugin jars built by CI for the server. Core downloads them; not meant for people."
+          fi
+          gh release upload "$TAG" "server-plugins-$SHA.zip" --repo "$REPO" --clobber
+          gh api "repos/$REPO/releases/tags/$TAG" \
+            --jq ".assets | sort_by(.created_at) | reverse | .[$KEEP:] | .[].id" |
+            while read -r id; do
+              gh api -X DELETE "repos/$REPO/releases/assets/$id"
+            done
+          echo "Published server-plugins-$SHA.zip"

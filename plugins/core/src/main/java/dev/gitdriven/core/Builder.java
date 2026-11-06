@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 
-/** Builds the clone with the Gradle Wrapper and prepares the staging/ folder. */
+/** Builds the clone with the Gradle Wrapper (build.source: local) and prepares the staging/ folder. */
 final class Builder {
     private final CoreConfig config;
     private final DeployState state;
@@ -38,16 +38,16 @@ final class Builder {
     }
 
     /**
-     * Copies jars + server files into staging.tmp/, READY included. Nothing the start script
-     * reads changes until {@link #publish()}.
+     * Copies the jars in {@code artifacts} (downloaded from CI or built here) + the clone's server
+     * files into staging.tmp/, READY included. Nothing the start script reads changes until
+     * {@link #publish()}.
      */
-    void prepare(Path repoDir, String commit, List<String> changes) throws IOException {
+    void prepare(Path repoDir, Path artifacts, String commit, List<String> changes) throws IOException {
         Path tmp = state.stagingTmpDir();
         DeployState.deleteRecursively(tmp);
         DeployState.deleteRecursively(state.stagingOldDir());
         Path pluginsOut = Files.createDirectories(tmp.resolve("plugins"));
 
-        Path artifacts = repoDir.resolve(config.artifactsDir());
         int jars = 0;
         if (Files.isDirectory(artifacts)) {
             try (Stream<Path> files = Files.list(artifacts)) {
@@ -58,7 +58,7 @@ final class Builder {
             }
         }
         if (jars == 0) {
-            throw new IOException("The build produced no jars in " + config.artifactsDir());
+            throw new IOException("No jars in " + artifacts);
         }
 
         // UpdateService already refused the commit if server/ breaks the rules; checked again
