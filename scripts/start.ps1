@@ -2,12 +2,15 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\start.ps1 -ApplyOnly
+#
+# Same variables as start.sh (SERVER_JAR, MEMORY, JAVA, JAVA_ARGS, RESTART_DELAY), or the
+# matching parameters (-ServerJar, -Memory, -Java, -JavaArgs, -RestartDelay).
 param(
     [string]$ServerJar = $(if ($env:SERVER_JAR) { $env:SERVER_JAR } else { "folia.jar" }),
     [string]$Memory = $(if ($env:MEMORY) { $env:MEMORY } else { "4G" }),
     [string]$Java = $(if ($env:JAVA) { $env:JAVA } else { "java" }),
-    [string[]]$JavaArgs = @(),
-    [int]$RestartDelay = 5,
+    [string[]]$JavaArgs = $(if ($env:JAVA_ARGS) { -split $env:JAVA_ARGS } else { @() }),
+    [int]$RestartDelay = $(if ($env:RESTART_DELAY) { [int]$env:RESTART_DELAY } else { 5 }),
     [switch]$ApplyOnly
 )
 $ErrorActionPreference = "Stop"

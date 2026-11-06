@@ -3,6 +3,7 @@ package dev.gitdriven.core;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -90,6 +91,17 @@ final class DeployState {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {
                 try {
                     Files.delete(p);
+                } catch (AccessDeniedException e) {
+                    // Windows refuses to delete read-only files, and git marks its pack files
+                    // read-only. Clear the flag and try again.
+                    if (!p.toFile().setWritable(true)) {
+                        throw new UncheckedIOException(e);
+                    }
+                    try {
+                        Files.delete(p);
+                    } catch (IOException again) {
+                        throw new UncheckedIOException(again);
+                    }
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
                 }

@@ -3,6 +3,7 @@ package dev.gitdriven.core;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabExecutor;
@@ -21,7 +22,7 @@ final class CoreCommands implements TabExecutor {
             changelog(sender);
             return true;
         }
-        String sub = args.length == 0 ? "status" : args[0].toLowerCase();
+        String sub = args.length == 0 ? "status" : args[0].toLowerCase(Locale.ROOT);
         switch (sub) {
             case "status" -> status(sender);
             case "check" -> {
@@ -63,7 +64,7 @@ final class CoreCommands implements TabExecutor {
                 "d", Messages.shortSha(st.deployedCommit().orElse(null)),
                 "p", st.stagedCommit().map(Messages::shortSha).orElse("—"));
         Messages.send(s, "<gray>Restart: <white><r></white> · mode: <white><m></white></gray>",
-                "r", rc.describeSchedule(), "m", plugin.config().restartMode().name().toLowerCase());
+                "r", rc.describeSchedule(), "m", plugin.config().restartMode().name().toLowerCase(Locale.ROOT));
         if (up == null) {
             Messages.send(s, "<red>Updater disabled: repository.url is not configured.</red>");
             return;
@@ -99,7 +100,7 @@ final class CoreCommands implements TabExecutor {
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (command.getName().equalsIgnoreCase("core") && args.length == 1) {
             return List.of("status", "check", "restart", "cancel").stream()
-                    .filter(o -> o.startsWith(args[0].toLowerCase()))
+                    .filter(o -> o.startsWith(args[0].toLowerCase(Locale.ROOT)))
                     .toList();
         }
         return List.of();

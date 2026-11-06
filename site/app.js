@@ -72,10 +72,12 @@
 
   // ---------- GitHub ----------
 
+  // Kept in localStorage: fresh for 5 minutes, and if GitHub fails later (the API allows 60
+  // requests per hour per visitor) the last copy is shown instead of an error.
   function cached(key) {
     try {
-      const hit = JSON.parse(sessionStorage.getItem(key));
-      if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
+      const hit = JSON.parse(localStorage.getItem(key));
+      if (hit && typeof hit.t === "number" && Array.isArray(hit.v)) return hit;
     } catch {
       // Storage blocked or corrupt: just fetch again.
     }
@@ -84,17 +86,29 @@
 
   function store(key, value) {
     try {
-      sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
+      localStorage.setItem(key, JSON.stringify({ t: Date.now(), v: value }));
     } catch {
       // Storage full or blocked: the page works without it.
     }
   }
 
+  /** Resolves to { list, stale } where stale is the age (ms) of a cached copy used after an error. */
   async function pulls(query) {
-    const key = `gitdriven:${cfg.repo}:${query}`;
+    const key = `gitdriven:v2:${cfg.repo}:${query}`;
     const hit = cached(key);
-    if (hit) return hit;
+    if (hit && Date.now() - hit.t < CACHE_MS) return { list: hit.v, stale: 0 };
 
+    try {
+      const list = await fetchPulls(query);
+      store(key, list);
+      return { list, stale: 0 };
+    } catch (error) {
+      if (hit) return { list: hit.v, stale: Date.now() - hit.t, error };
+      throw error;
+    }
+  }
+
+  async function fetchPulls(query) {
     const res = await fetch(`${api}/pulls?${query}`, {
       headers: { Accept: "application/vnd.github+json" },
     });
@@ -103,7 +117,7 @@
       error.status = res.status;
       throw error;
     }
-    const list = (await res.json()).map((pr) => ({
+    return (await res.json()).map((pr) => ({
       number: pr.number,
       title: pr.title,
       url: pr.html_url,
@@ -114,13 +128,12 @@
       draft: Boolean(pr.draft),
       mergedAt: pr.merged_at,
     }));
-    store(key, list);
-    return list;
   }
 
   // ---------- Chat rendering ----------
 
   const log = $("chat-log");
+  log.setAttribute("aria-busy", "true"); // until the changelog arrives (see show())
   const ago = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
   function relative(iso) {
@@ -174,9 +187,18 @@
     log.replaceChildren(...lines);
     log.querySelectorAll(".chat-line").forEach((line, i) => line.style.setProperty("--i", i));
     log.classList.add("is-live");
+    log.removeAttribute("aria-busy");
   }
 
-  function renderChangelog(merged, open) {
+  function staleLine(age) {
+    return coreLine(
+      el("span", "c-yellow", `GitHub isn't answering right now, so this is the list from ${relative(new Date(Date.now() - age).toISOString())}. `),
+      githubLink("See the latest on GitHub", "/pulls?q=is%3Apr+is%3Amerged"),
+      el("span", "c-yellow", ".")
+    );
+  }
+
+  function renderChangelog(merged, open, stale) {
     const lines = [];
 
     if (merged.length === 0 && open.length === 0) {
@@ -206,6 +228,7 @@
       lines.push(ul);
     }
 
+    if (stale > 0) lines.push(staleLine(stale));
     show(lines);
   }
 
@@ -258,11 +281,11 @@
     pulls("state=open&base=main&sort=created&direction=desc&per_page=20"),
   ])
     .then(([closed, opened]) => {
-      const merged = closed
+      const merged = closed.list
         .filter((pr) => pr.mergedAt)
         .sort((a, b) => Date.parse(b.mergedAt) - Date.parse(a.mergedAt));
-      const open = opened.filter((pr) => !pr.draft);
-      renderChangelog(merged, open);
+      const open = opened.list.filter((pr) => !pr.draft);
+      renderChangelog(merged, open, Math.max(closed.stale, opened.stale));
       renderBuilders(merged);
     })
     .catch(renderError);

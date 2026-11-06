@@ -92,6 +92,10 @@ put the file in `server/plugins/Core/config.yml` in the repo: it then overwrites
 server's copy on every deploy. Options are explained in the file itself and in
 [ARCHITECTURE.md](ARCHITECTURE.md#restart-policy).
 
+An invalid value (a typo in `restart.mode`, a time like `25:00`) never disables Core: it
+falls back to the default and logs a warning at startup, so a bad config merge can still be
+fixed with another merge. Check the console after changing it.
+
 ## Updating the Folia version
 
 1. Open a PR changing `foliaApiVersion` and `minecraftApiVersion` in `gradle.properties`.
@@ -113,6 +117,11 @@ again. Once the revert is merged, Core applies it normally.
 **Broken Core** (no longer updates). Build Core from a good commit
 (`./gradlew :plugins:core:jar`), put it in place as `plugins/core.jar`, delete
 `.git-driven/staging/` and start the server. Then revert the PR that broke it.
+
+**Update checks failing.** `/core status` shows the last error; the console logs it once
+(not every minute) and says when checks work again. Core removes stale git lock files
+left by a shutdown in the middle of a fetch, and clones again if its copy of the repo is
+broken, so most of these fix themselves.
 
 **Start from scratch.** Stop the server, delete `.git-driven/` and start it: Core clones
 and builds everything again.
