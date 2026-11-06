@@ -11,7 +11,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 
-/** Builds the clone with the Gradle Wrapper and prepares the staging/ folder. */
+/** Builds the clone with the Gradle Wrapper (build.source: local) and prepares the staging/ folder. */
 final class Builder {
     private final CoreConfig config;
     private final DeployState state;
@@ -37,13 +37,17 @@ final class Builder {
         return runner.run(repoDir, cmd, config.buildTimeout(), env, 30, state.buildLog());
     }
 
-    /** Copies jars + server files into staging/ and only creates READY at the very end. */
-    void stage(Path repoDir, String commit, List<String> changes) throws IOException {
+    /**
+     * Copies the jars in {@code artifacts} (downloaded from CI or built here) + the clone's server
+     * files into staging.tmp/, READY included. Nothing the start script reads changes until
+     * {@link #publish()}.
+     */
+    void prepare(Path repoDir, Path artifacts, String commit, List<String> changes) throws IOException {
         Path tmp = state.stagingTmpDir();
         DeployState.deleteRecursively(tmp);
+        DeployState.deleteRecursively(state.stagingOldDir());
         Path pluginsOut = Files.createDirectories(tmp.resolve("plugins"));
 
-        Path artifacts = repoDir.resolve(config.artifactsDir());
         int jars = 0;
         if (Files.isDirectory(artifacts)) {
             try (Stream<Path> files = Files.list(artifacts)) {
@@ -54,7 +58,7 @@ final class Builder {
             }
         }
         if (jars == 0) {
-            throw new IOException("The build produced no jars in " + config.artifactsDir());
+            throw new IOException("No jars in " + artifacts);
         }
 
         // UpdateService already refused the commit if server/ breaks the rules; checked again
@@ -73,9 +77,24 @@ final class Builder {
 
         Files.writeString(tmp.resolve("COMMIT"), commit + "\n");
         Files.write(tmp.resolve("CHANGES.txt"), changes, StandardCharsets.UTF_8);
+        Files.writeString(tmp.resolve("READY"), commit + "\n");
+    }
 
-        state.clearStaging();
-        Files.move(tmp, state.stagingDir());
-        Files.writeString(state.stagingDir().resolve("READY"), commit + "\n");
+    /**
+     * Swaps the prepared staging.tmp/ in as staging/ with two renames, instead of deleting the
+     * old staging/ and copying the new one. Called under {@link RestartController}'s lock, so a
+     * restart can't happen between the renames.
+     */
+    void publish() throws IOException {
+        Path old = state.stagingOldDir();
+        if (Files.exists(state.stagingDir())) {
+            Files.move(state.stagingDir(), old);
+        }
+        Files.move(state.stagingTmpDir(), state.stagingDir());
+        try {
+            DeployState.deleteRecursively(old);
+        } catch (IOException e) {
+            // Only a leftover: prepare() removes it before the next update.
+        }
     }
 }

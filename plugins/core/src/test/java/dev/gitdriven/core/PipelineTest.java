@@ -58,13 +58,46 @@ class PipelineTest {
         git.checkout(code);
         Path artifacts = Files.createDirectories(state.repoDir().resolve("build/server-plugins"));
         Files.writeString(artifacts.resolve("core.jar"), "fake");
-        new Builder(config(), state, runner).stage(state.repoDir(), code, log);
+        Builder builder = new Builder(config(), state, runner);
+        builder.prepare(state.repoDir(), artifacts, code, log);
+        assertTrue(state.stagedCommit().isEmpty(), "nothing is staged until publish()");
+        builder.publish();
 
         assertEquals(code, state.stagedCommit().orElseThrow());
         assertEquals(log, state.stagedChanges());
         assertTrue(Files.exists(state.stagingDir().resolve("plugins/core.jar")));
         assertTrue(Files.exists(state.stagingDir().resolve("files/bukkit.yml")));
         assertFalse(Files.exists(state.stagingDir().resolve("files/README.md")));
+    }
+
+    /**
+     * A newer build replaces the staged one. While it's being prepared the old staging/ stays
+     * complete (READY included), so a restart at that moment still applies something.
+     */
+    @Test
+    void newerBuildReplacesTheStagingInOneSwap() throws Exception {
+        DeployState state = new DeployState(tmp.resolve("server/.git-driven"));
+        Path repo = Files.createDirectories(tmp.resolve("repo"));
+        Path artifacts = Files.createDirectories(repo.resolve("build/server-plugins"));
+        Builder builder = new Builder(config(), state, runner);
+
+        Files.writeString(artifacts.resolve("old.jar"), "1");
+        builder.prepare(repo, artifacts, "aaa", List.of("aaa First"));
+        builder.publish();
+
+        Files.delete(artifacts.resolve("old.jar"));
+        Files.writeString(artifacts.resolve("new.jar"), "2");
+        builder.prepare(repo, artifacts, "bbb", List.of("bbb Second"));
+        assertEquals("aaa", state.stagedCommit().orElseThrow());
+        assertTrue(Files.exists(state.stagingDir().resolve("plugins/old.jar")));
+
+        builder.publish();
+        assertEquals("bbb", state.stagedCommit().orElseThrow());
+        assertEquals(List.of("bbb Second"), state.stagedChanges());
+        assertTrue(Files.exists(state.stagingDir().resolve("plugins/new.jar")));
+        assertFalse(Files.exists(state.stagingDir().resolve("plugins/old.jar")));
+        assertFalse(Files.exists(state.stagingTmpDir()));
+        assertFalse(Files.exists(state.stagingOldDir()));
     }
 
     /** A git process killed mid-checkout (server shutdown) leaves lock files behind. */
@@ -152,6 +185,6 @@ class PipelineTest {
     private static CoreConfig config() {
         return new CoreConfig("file://x", "main", Duration.ofSeconds(60), List.of(), Duration.ofMinutes(1),
                 "build/server-plugins", "server", new PathGlob(List.of()), CoreConfig.RestartMode.DEBOUNCE,
-                Duration.ofMinutes(10), LocalTime.MIDNIGHT, 60, true);
+                Duration.ofMinutes(10), LocalTime.MIDNIGHT, 60, true, CoreConfig.BuildSource.LOCAL, "");
     }
 }

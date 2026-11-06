@@ -42,16 +42,17 @@ PRs), or add a second approver to `CODEOWNERS`.
       <https://sdfgsdfggsfd.github.io/gitDriven/> on every merge that touches it.
       Edit `site/config.js` to set the server address once there is one.
 
-**Auto-merge token** — without it, merges done by auto-merge don't run the `Website` and
-`Build` workflows on `main` (GitHub doesn't start workflows from events caused by the
-default `GITHUB_TOKEN`), so website changes from PRs would never get published.
-- [ ] Create a **fine-grained** token (your account → Settings → Developer settings →
-      Personal access tokens → Fine-grained tokens). Repository access: **Only select
-      repositories → gitDriven**. Permissions: **Contents** and **Pull requests**, both
-      **Read and write**.
-- [ ] Save it as the `AUTOMERGE_TOKEN` secret (Settings → Secrets → Actions).
-- When it expires, auto-merge keeps working with the default token, but `Website` stops
-  running after merges again: create a new one and update the secret.
+**Auto-merge token (optional, usually leave it unset)** — without the `AUTOMERGE_TOKEN`
+secret, merges done by auto-merge don't start other workflows on `main` (GitHub doesn't
+start workflows from events caused by the default `GITHUB_TOKEN`). `Server build` doesn't
+care: it also runs every 10 minutes. `Website` does: after an auto-merge that touches
+`site/`, run it by hand (Actions → Website → Run workflow).
+- **Never** use the token of an account on the ruleset's bypass list (e.g. the repository
+  admin). Auto-merge acts as that account, and its bypass lets PRs in without approval.
+  That's how PR #2 got merged 11 seconds after it was opened.
+- If you want the token anyway: create a separate bot account with **Write** access (not
+  admin, not on the bypass list), make a fine-grained token there (only gitDriven;
+  **Contents** and **Pull requests**: Read and write) and save it as `AUTOMERGE_TOKEN`.
 
 **CODEOWNERS** — `.github/CODEOWNERS` currently lists only `@sdfgsdfggsfd`. To add
 approvers, add their usernames next to it (e.g. `@alice @bob`). Teams
@@ -74,8 +75,9 @@ with the URL can post to the channel.
 - [ ] **Folia:** no `Bukkit.getScheduler()`; touches entities/blocks through the right
       scheduler; teleports with `teleportAsync`. (CI catches the basics, not everything.)
 - [ ] Nothing heavy per tick, nothing that grows without bounds (lists, maps, entities).
-- [ ] Touches `*.gradle.kts`, `gradle/`, `scripts/` or `.github/`? That runs **on the
-      server machine**: read it line by line.
+- [ ] Touches `scripts/` or `.github/`? Scripts run **on the server machine**, workflows
+      build what the server installs: read it line by line. Same for `*.gradle.kts` and
+      `gradle/` (they decide what goes into the jars).
 - [ ] Touches `server/`? It's copied over the server root. Core already refuses jars,
       scripts, Core settings and ops/whitelist/bans, but configs can still give power:
       RCON/query, `online-mode`, proxy forwarding (`spigot.yml` bungeecord, `proxies` in

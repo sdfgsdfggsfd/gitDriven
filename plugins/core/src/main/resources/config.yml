@@ -8,15 +8,25 @@ repository:
   poll-interval-seconds: 60
 
 build:
-  # Gradle Wrapper arguments (gradlew / gradlew.bat), run inside the clone.
+  # Where the plugin jars come from:
+  #   ci    — download the jars that the "Server build" workflow publishes for each commit
+  #           (release "server-build" on GitHub). Gradle never runs on this machine.
+  #   local — build the clone here with the Gradle Wrapper (the settings below).
+  source: ci
+  # ci only: download URL, {commit} = full SHA. Empty = the server-build release of
+  # repository.url (GitHub only; any other host falls back to local).
+  ci-url: ""
+  # local only: Gradle Wrapper arguments (gradlew / gradlew.bat), run inside the clone.
   args: ["build", "collectServerPlugins", "--no-daemon", "--console=plain"]
   timeout-minutes: 15
-  # Where the build leaves the finished jars (relative to the repo root).
+  # local only: where the build leaves the finished jars (relative to the repo root).
   artifacts-dir: "build/server-plugins"
   # Repo folder copied over the server root (versioned configs).
   server-files-dir: "server"
   # Commits that only touch these paths trigger no build and no restart.
   # Syntax: * = anything without "/", ** = anything.
+  # Files under plugins/ and server/ always count, whatever is listed here: they reach the
+  # server (inside a jar or copied over the root).
   ignore-paths:
     - "**.md"
     - "docs/**"

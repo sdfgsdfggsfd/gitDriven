@@ -8,8 +8,12 @@
 # and server/ is copied over the server root.
 /plugins/core/        @sdfgsdfggsfd
 /server/              @sdfgsdfggsfd
-/build.gradle.kts     @sdfgsdfggsfd
-/settings.gradle.kts  @sdfgsdfggsfd
+# Gradle runs these as code on the server machine during every build: the root build and
+# settings, every plugin's build.gradle.kts, buildSrc/ and the properties that tune Gradle.
+*.gradle.kts          @sdfgsdfggsfd
+*.gradle              @sdfgsdfggsfd
+gradle.properties     @sdfgsdfggsfd
+/buildSrc/            @sdfgsdfggsfd
 /gradle/              @sdfgsdfggsfd
 /gradlew              @sdfgsdfggsfd
 /gradlew.bat          @sdfgsdfggsfd

@@ -4,11 +4,13 @@ Install once; after that the server keeps itself up to date from the repository.
 
 ## Requirements
 
-- **Java 25** (required by Folia 26.3; Core uses the same Java to build).
+- **Java 25** (required by Folia 26.3).
 - **git** on the `PATH`.
-- Server RAM **+ ~1 GB** for Gradle during builds (~1 min each).
 - Linux recommended. Windows works (`start.ps1`).
-- Outbound access to `github.com`, `repo.papermc.io` and Maven Central (build dependencies).
+- Outbound access to `github.com` (the repository and the `server-build` release, which
+  redirects to `objects.githubusercontent.com`).
+- Only with `build.source: local` (Gradle on the machine): + ~1 GB RAM during builds and
+  access to `repo.papermc.io` and Maven Central.
 
 ## Installation
 
@@ -38,8 +40,9 @@ Install once; after that the server keeps itself up to date from the repository.
    ```
    On Windows: `powershell -ExecutionPolicy Bypass -File start.ps1 -Memory 6G`.
 
-6. **First cycle.** Within ~15 s Core clones the repo, builds everything and, with the
-   server empty, restarts. The script applies the update and the server comes back with
+6. **First cycle.** Within ~15 s Core clones the repo, downloads the jars CI built for the
+   tip of `main` and, with the server empty, restarts. (Nothing published yet? Run
+   Actions → Server build → Run workflow on GitHub, or wait for its 10-minute schedule.) The script applies the update and the server comes back with
    all plugins. Check with `/core status` in the console.
 
 ### With systemd
@@ -119,7 +122,14 @@ indefinitely. Check the console after changing it.
 ## Emergencies
 
 **Broken build on main.** Nothing to do on the machine: the server stays on the last
-good version. Merge a fix or a revert. Log in `.git-driven/last-build.log`.
+good version. Merge a fix or a revert. The log is in the failed `Server build` run on
+GitHub (or `.git-driven/last-build.log` with `build.source: local`).
+
+**CI down or not publishing.** `/core status` shows "waiting for the CI build", and the
+admins are warned after 1 h. Check the `Server build` workflow (GitHub disables schedules
+after 60 days without activity in the repository). To keep updating meanwhile, set
+`build.source: local` in `plugins/Core/config.yml` and restart: Core builds on the machine
+again.
 
 **New plugin crashing the server.** Usually Paper just disables the plugin that errored
 and the rest keeps working. The fix is **reverting the PR on GitHub**. If the server
@@ -148,8 +158,9 @@ job with `tar` at 23:50 UTC, before the recap). The repository doesn't store the
 The risk here is low and accepted (trusted approvers, a server for fun), but know what
 is running:
 
-- **Approved code runs on the machine.** The build runs the repo's Gradle scripts, and the
-  plugins run inside the server's JVM, with the permissions of the hosting user.
+- **Approved code runs on the machine.** The plugins run inside the server's JVM, with the
+  permissions of the hosting user. The build (Gradle scripts, tests) runs in CI, not here,
+  unless `build.source: local`.
 - Run it as a **dedicated user without sudo**, preferably in a container or VM.
 - Don't keep anything sensitive on that machine/user (SSH keys for other places, tokens).
 - Secrets (RCON, webhooks) live only on the server, never in `server/` in the repo.

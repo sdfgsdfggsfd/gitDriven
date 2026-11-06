@@ -22,6 +22,8 @@ import java.util.stream.Stream;
  * staging/CHANGES.txt   new commits (one line each)
  * staging/plugins/      jars to install into plugins/
  * staging/files/        copy of the repo's server/, goes over the server root
+ * staging.tmp/          next staging/ being written; renamed into place (Builder#publish)
+ * ci-plugins/           jars downloaded from CI (build.source: ci)
  * deployed-commit       SHA in production (written by the script when applying)
  * last-changes.txt      CHANGES.txt of the last applied update
  * managed-plugins.txt   jars installed by Core (the script removes them before applying)
@@ -47,8 +49,19 @@ final class DeployState {
         return root.resolve("staging");
     }
 
+    /** The next staging/, being written. Becomes staging/ in one rename. */
     Path stagingTmpDir() {
         return root.resolve("staging.tmp");
+    }
+
+    /** Jars downloaded from CI for the commit being staged (build.source: ci). */
+    Path ciPluginsDir() {
+        return root.resolve("ci-plugins");
+    }
+
+    /** The previous staging/ while it's being swapped out. */
+    Path stagingOldDir() {
+        return root.resolve("staging.old");
     }
 
     Path buildLog() {

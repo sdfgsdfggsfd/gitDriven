@@ -8,18 +8,19 @@ GitHub                                   Server machine
 PR ─▶ CI (build.yml) ─┐                  start.sh (loop)
    CODEOWNER approves ┤                     │ 1. applies .git-driven/staging/ (if any)
 auto-merge.yml ───────┴▶ main ◀── fetch ─┐  │ 2. java -jar folia.jar
-                                         │  ▼
-daily-recap.yml (00:00 UTC)              │  Folia
-  └▶ Release recap-YYYY-MM-DD            └─ Core ── checkout → gradlew build → staging/
-                                              └─ RestartController ── shutdown ─▶ (back to 1)
+                          │              │  ▼
+server-build.yml ◀────────┘              │  Folia
+  └▶ Release server-build ◀── download ──┴─ Core ── checkout + jars → staging/
+daily-recap.yml (00:00 UTC)                   └─ RestartController ── shutdown ─▶ (back to 1)
+  └▶ Release recap-YYYY-MM-DD
 ```
 
 Three pieces, each with one responsibility:
 
 | Piece | Does | Doesn't |
 |---|---|---|
-| **GitHub** (CI, auto-merge, recap) | Makes sure only code that builds and was approved gets in | Doesn't talk to the server |
-| **Core** (plugin) | Detects commits, builds, prepares the staging, decides when to restart | Doesn't swap jars while the server is running |
+| **GitHub** (CI, auto-merge, recap) | Makes sure only code that builds and was approved gets in, and builds the jars of `main` | Doesn't talk to the server |
+| **Core** (plugin) | Detects commits, downloads their jars, prepares the staging, decides when to restart | Doesn't run Gradle, doesn't swap jars while the server is running |
 | **start script** | Applies the staging while the server is **stopped** and starts it again | Doesn't build anything |
 
 ## Why restart and not hot-reload
@@ -39,19 +40,28 @@ Every `poll-interval-seconds` (60 s), on its own thread, never on a game thread:
    try again (the next commit will). `/core check` forces it.
 4. **Docs only?** If *all* files changed since the production commit match
    `ignore-paths` (`**.md`, `docs/**`, `.github/**`, `site/**`), mark it as applied, with no build
-   and no restart.
+   and no restart. Files under `plugins/` and `server/` never count as docs: they reach the
+   server, even a `.md` a plugin packs into its jar. If an update is already staged and the
+   new commits on top of it are docs only, the staged build stays and the restart isn't pushed
+   back.
 5. **Check `server/`.** Everything in it is copied over the server root, so only config
    files may be there (rules in [server/README.md](../server/README.md)). A commit that
    breaks them is refused like a failed build, before Gradle runs.
-6. **Build.** `checkout` of the commit + `gradlew build collectServerPlugins --no-daemon`
-   with the same Java as the server. Full output in `.git-driven/last-build.log`.
-   Failed: notify everyone with `core.admin`; the server stays on the current version.
-7. **Staging.** Copy `build/server-plugins/*.jar` and the `server/` folder into
-   `.git-driven/staging/`, write `COMMIT`, `CHANGES.txt` and, last, `READY`.
+6. **Jars.** `checkout` of the commit, then download `server-plugins-<sha>.zip` from the
+   `server-build` release (next section). Not published yet: wait and try again at the
+   next check; after 1 h everyone with `core.admin` is warned. With `build.source: local`,
+   Core runs `gradlew build collectServerPlugins --no-daemon` here instead (output in
+   `.git-driven/last-build.log`; a failed build is reported and not retried).
+7. **Staging.** Copy the jars and the `server/` folder into
+   `.git-driven/staging.tmp/` with `COMMIT`, `CHANGES.txt` and `READY`, then rename it to
+   `staging/`.
 8. **Restart.** Announce it in chat and hand over to the `RestartController` (next section).
 
 If another merge lands while an update is waiting for the restart, Core builds the
 new commit and replaces the staging. The tip of `main` is always what goes to the server.
+The old `staging/` stays complete until the new one is renamed into place, and the rename
+holds the same lock as the restart countdown: a restart never finds a half-replaced staging.
+If the countdown was already running, the restart applies the newer build.
 
 ## Restart policy
 
@@ -89,11 +99,13 @@ At the server root (the Java working directory):
 │   ├── files/            copy of the repo's server/ (without README.md and .gitkeep)
 │   ├── COMMIT            SHA
 │   ├── CHANGES.txt       "abc1234 PR title (#12) — author", one per line
-│   └── READY             created last; without it the script ignores the staging
+│   └── READY             without it the script ignores the staging
+├── staging.tmp/          the next staging while Core writes it (renamed to staging/)
 ├── deployed-commit       SHA in production (written by the script)
 ├── last-changes.txt      CHANGES.txt of the last update (shown on join and in /changelog)
 ├── managed-plugins.txt   jars installed by Core (removed before applying the new ones)
-└── last-build.log        output of the last build
+├── ci-plugins/           jars downloaded from CI for the commit being staged
+└── last-build.log        output of the last local build (build.source: local)
 ```
 
 Before every boot, if `staging/READY` exists, the script (`start.sh` / `start.ps1`):
@@ -110,13 +122,28 @@ Core never restarts it: updates are built and wait, `/core restart` is refused, 
 `/core status` and the console say why. If a staging is found unapplied at boot, Core
 logs an error and does not schedule a restart (to avoid a loop).
 
-## Building on the server (not in CI)
+## Building in CI (not on the server)
 
-Building on the machine itself keeps the system simple: no token, no artifact download,
-and the server depends only on the public repository. The cost is CPU/RAM during the
-build (~1 min, Gradle capped at 1 GB in `gradle.properties`, no daemon). If that gets
-heavy, a natural next step is for Core to download the `server-plugins` artifact that
-CI already produces.
+The `Server build` workflow (`.github/workflows/server-build.yml`) builds the tip of `main`
+and publishes `server-plugins-<full sha>.zip` (the jars + a `COMMIT` file) on the
+`server-build` pre-release. It keeps the last 10 builds. Core downloads the zip of the
+commit it fetched, checks that `COMMIT` matches and that it holds only plain `*.jar`
+files, and stages them. No token is needed on the server: release downloads of a public
+repository are open.
+
+Why: the Gradle scripts and tests of every approved PR used to run on the server machine,
+and anything a build left behind (e.g. in Gradle's cache) stayed there even after a
+revert. Now the server only runs the plugins themselves, and the build runs on a
+throwaway GitHub runner with a read-only token.
+
+Why a schedule and not just `push`: auto-merge merges with the default `GITHUB_TOKEN`,
+and GitHub doesn't start workflows from events it causes. So the workflow also runs every
+10 minutes and builds the tip of `main` if it isn't published yet. Expect ~10–20 min
+between a merge and the update being ready (GitHub's schedule can run late).
+
+`build.source: local` in Core's `config.yml` brings back the old behavior (Gradle on the
+machine), for forks hosted outside GitHub or when CI is down. If `repository.url` isn't a
+GitHub repository and `build.ci-url` isn't set, Core builds locally on its own.
 
 ## Core updates itself
 

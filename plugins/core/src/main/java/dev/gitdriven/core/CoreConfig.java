@@ -7,6 +7,8 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -31,9 +33,18 @@ record CoreConfig(
         Duration debounce,
         LocalTime dailyTimeUtc,
         int countdownSeconds,
-        boolean applyWhenEmpty) {
+        boolean applyWhenEmpty,
+        BuildSource buildSource,
+        String ciUrl) {
 
     enum RestartMode { IMMEDIATE, DEBOUNCE, DAILY }
+
+    /** CI = download the jars CI built ({@link CiArtifacts}); LOCAL = run Gradle on this machine. */
+    enum BuildSource { CI, LOCAL }
+
+    /** Asset that .github/workflows/server-build.yml publishes for each commit of the branch. */
+    private static final Pattern GITHUB_REPO =
+            Pattern.compile("https://github\\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\\.git)?/?");
 
     static final List<String> DEFAULT_BUILD_ARGS =
             List.of("build", "collectServerPlugins", "--no-daemon", "--console=plain");
@@ -54,8 +65,17 @@ record CoreConfig(
             log.warning("build.args is empty; using " + DEFAULT_BUILD_ARGS + ".");
             args = DEFAULT_BUILD_ARGS;
         }
+        String repoUrl = text(c, "repository.url", "");
+        BuildSource source = source(text(c, "build.source", "ci"), log);
+        String ciUrl = "";
+        if (source == BuildSource.CI) {
+            ciUrl = ciUrl(text(c, "build.ci-url", ""), repoUrl, log);
+            if (ciUrl.isEmpty()) {
+                source = BuildSource.LOCAL;
+            }
+        }
         return new CoreConfig(
-                text(c, "repository.url", ""),
+                repoUrl,
                 text(c, "repository.branch", "main"),
                 Duration.ofSeconds(Math.max(15, c.getLong("repository.poll-interval-seconds", 60))),
                 args,
@@ -68,7 +88,42 @@ record CoreConfig(
                 Duration.ofMinutes(Math.clamp(c.getLong("restart.debounce-minutes", 10), 0, MAX_DEBOUNCE_MINUTES)),
                 time(c.get("restart.daily-time-utc", "00:00"), log),
                 Math.clamp(c.getInt("restart.countdown-seconds", 60), 0, MAX_COUNTDOWN_SECONDS),
-                c.getBoolean("restart.apply-when-empty", true));
+                c.getBoolean("restart.apply-when-empty", true),
+                source,
+                ciUrl);
+    }
+
+    static BuildSource source(String raw, Logger log) {
+        try {
+            return BuildSource.valueOf(raw.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            log.warning("build.source '" + raw + "' is not valid (ci or local); using ci.");
+            return BuildSource.CI;
+        }
+    }
+
+    /**
+     * build.ci-url, or the server-build release of a GitHub repository.url.
+     *
+     * @return "" when there's no usable URL (the caller then builds locally)
+     */
+    static String ciUrl(String configured, String repoUrl, Logger log) {
+        if (!configured.isEmpty()) {
+            if (configured.contains("{commit}")) {
+                return configured;
+            }
+            log.warning("build.ci-url must contain {commit} (the full SHA); ignored.");
+        }
+        Matcher m = GITHUB_REPO.matcher(repoUrl);
+        if (m.matches()) {
+            return "https://github.com/" + m.group(1) + "/" + m.group(2)
+                    + "/releases/download/server-build/server-plugins-{commit}.zip";
+        }
+        if (!repoUrl.isEmpty() && !repoUrl.contains("OWNER/REPO")) {
+            log.warning("build.source is ci, but repository.url is not a GitHub repository and build.ci-url is "
+                    + "not set: building on this machine instead.");
+        }
+        return "";
     }
 
     /**
@@ -86,6 +141,18 @@ record CoreConfig(
                         + "); ignored.");
             }
         }
+    }
+
+    /**
+     * True if every path only touches docs/CI: no build and no restart needed.
+     * {@code ignore-paths} decides, except under {@code plugins/} and the server-files folder.
+     * Everything there reaches the server (packed into a jar or copied over the root), so a broad
+     * pattern like {@code **.md} can't skip a file a plugin ships as a resource.
+     */
+    boolean onlyIgnored(List<String> paths) {
+        String serverPrefix = serverFilesDir.replaceAll("/+$", "") + "/";
+        return paths.stream().allMatch(p -> ignorePaths.matches(p)
+                && !p.startsWith("plugins/") && !p.startsWith(serverPrefix));
     }
 
     boolean isPlaceholderRepo() {
